@@ -4,6 +4,9 @@ echo "Starting workspace_na_pipeline.sh"
 # Change working directory to script directory
 cd "$(dirname "$0")"
 
+# Configuration options
+REMOVE_PROCESSED_DIRS=true  # Set to false to keep processed directories in the input location
+
 # Lock file to ensure single instance
 LOCK_FILE="/tmp/workspace_na_pipeline.lock"
 
@@ -165,9 +168,13 @@ for subdir in "$INPUT_DIR"/*/ ; do
                 echo "Warning: Output directory not found in $WSL_WORK_DIR/$safe_subdir_name"
             fi
 
-            # Remove processed subdirectory from input directory
-            rm -rf "$INPUT_DIR/$subdir_name"
-            echo "Removed processed directory from input: $INPUT_DIR/$subdir_name"
+            # Remove processed subdirectory from input directory if configured to do so
+            if [ "$REMOVE_PROCESSED_DIRS" = true ]; then
+                rm -rf "$INPUT_DIR/$subdir_name"
+                echo "Removed processed directory from input: $INPUT_DIR/$subdir_name"
+            else
+                echo "Keeping processed directory in input: $INPUT_DIR/$subdir_name"
+            fi
 
             # Clean up temporary working directory for this subdirectory
             echo "Cleaning up temporary directory: $WSL_WORK_DIR/$safe_subdir_name"
