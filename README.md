@@ -225,6 +225,30 @@ Where:
 - `INPUT_DIR`: Parent directory containing subdirectories with images to process
 - `OUTPUT_DIR`: Directory where all results will be stored
 
+### Configuration Options
+
+The script includes several configuration options at the top of the file:
+
+```bash
+# Configuration options
+REMOVE_PROCESSED_DIRS=true  # Set to false to keep processed directories in the input location
+```
+
+- `REMOVE_PROCESSED_DIRS`: Controls whether processed directories are removed from the input location
+  - `true`: Removes processed directories after successful processing (default)
+  - `false`: Keeps processed directories in the input location
+
+### File Processing Features
+
+The script includes intelligent file processing capabilities:
+
+1. **Date-Time Stamping**: Processed files are renamed with a date suffix in the format `{ORIGINAL_FILENAME}_{DDMMYYYY}.{ORIGINAL_FILE_EXTENSION}`
+
+2. **Incremental Processing**: The script checks if files have been processed before:
+   - Files are only processed if they don't exist in the destination directory
+   - If a file exists in the destination but the source file is newer, it will be reprocessed
+   - Directories with no files needing processing are skipped entirely
+
 ### Example Structure
 
 Input structure:
@@ -241,12 +265,16 @@ input_directory/
 After processing, the output structure will be:
 ```
 output_directory/
-├── batch1_page/
-│   ├── image1.xml
-│   ├── image2.xml
-├── batch2_page/
-│   ├── image3.xml
-│   └── image4.xml
+├── batch1/
+│   ├── image1_01012023.xml
+│   ├── image1_01012023.txt
+│   ├── image2_01012023.xml
+│   └── image2_01012023.txt
+├── batch2/
+│   ├── image3_01012023.xml
+│   ├── image3_01012023.txt
+│   ├── image4_01012023.xml
+│   └── image4_01012023.txt
 ```
 
 ### Example Usage
@@ -258,9 +286,10 @@ output_directory/
 The script will:
 1. Process each subdirectory in the input directory
 2. Run the HTR pipeline on each subdirectory's images
-3. Move the resulting page files to the output directory
-4. Organize results by adding the subdirectory name as a prefix
-
+3. Convert XML files to text using xml2text.sh
+4. Add date-time stamps to output filenames
+5. Organize results in the output directory
+6. Optionally remove processed directories from the input location
 
 ## XML to Text Conversion
 
