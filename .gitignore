@@ -6,3 +6,4 @@ temp_workspace/
 .cursor/
 _my_test_artifacts/
 *.lock
+xml_conversion_errors.log
