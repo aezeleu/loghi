@@ -365,6 +365,31 @@ Dependencies:
 sudo apt-get install xmlstarlet
 ```
 
+### File Structure and Paths
+
+When using the pipeline scripts, it's important to understand the file structure and paths:
+
+1. **XML File Location**: The na-pipeline.sh script generates XML files in the `page` directory, not in the `output` directory.
+
+2. **Directory Structure**:
+   ```
+   workspace_directory/
+   ├── subdirectory/
+   │   ├── image1.jpg
+   │   ├── image2.jpg
+   │   ├── page/
+   │   │   ├── image1.xml
+   │   │   ├── image2.xml
+   │   ├── output/
+   │   │   ├── image1.txt
+   │   │   ├── image2.txt
+   ```
+
+3. **Path Configuration**: The workspace_na_pipeline.sh script is configured to:
+   - Look for XML files in the `page` directory
+   - Generate text files in the `output` directory
+   - Copy both XML and text files to the destination with date suffixes
+
 ### Error Handling
 
 The scripts in this repository include comprehensive error handling to ensure robustness:
