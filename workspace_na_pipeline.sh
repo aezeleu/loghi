@@ -5,7 +5,7 @@ echo "Starting workspace_na_pipeline.sh"
 cd "$(dirname "$0")"
 
 # Configuration options
-REMOVE_PROCESSED_DIRS=true  # Set to false to keep processed directories in the input location
+REMOVE_PROCESSED_DIRS=false  # Set to false to keep processed directories in the input location
 
 # Lock file to ensure single instance
 LOCK_FILE="/tmp/workspace_na_pipeline.lock"
@@ -150,7 +150,18 @@ for subdir in "$INPUT_DIR"/*/ ; do
             ./na-pipeline.sh "$WSL_WORK_DIR/$safe_subdir_name" "$WSL_WORK_DIR/$safe_subdir_name/output"
 
             # Convert XML files to text files using xml2text.sh script
+            echo "Converting XML files to text using xml2text.sh..."
             ./xml2text.sh "$WSL_WORK_DIR/$safe_subdir_name/output" "$WSL_WORK_DIR/$safe_subdir_name/output"
+            XML_CONVERT_STATUS=$?
+            
+            if [ $XML_CONVERT_STATUS -ne 0 ]; then
+                echo "Error: xml2text.sh failed with exit code $XML_CONVERT_STATUS"
+                echo "Continuing with pipeline, but text conversion may be incomplete"
+                # Log the error to a file for later review
+                echo "$(date): Error in xml2text.sh for directory $safe_subdir_name (exit code: $XML_CONVERT_STATUS)" >> "xml_conversion_errors.log"
+            else
+                echo "XML to text conversion completed successfully"
+            fi
 
             # Copy output files to final destination with date suffix
             if [ -d "$WSL_WORK_DIR/$safe_subdir_name/output" ]; then

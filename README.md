@@ -355,10 +355,32 @@ The `xml2text.sh` script uses xmlstarlet to process PageXML files. Important fea
 - Extracts text from TextEquiv/Unicode elements
 - Maintains line breaks between text lines
 - Requires xmlstarlet to be installed
+- Includes robust error handling and reporting
+- Provides a summary of processed files and any errors encountered
+- Creates placeholder text files even when XML processing fails
 
 Dependencies:
 
 ```bash
 sudo apt-get install xmlstarlet
 ```
+
+### Error Handling
+
+The scripts in this repository include comprehensive error handling to ensure robustness:
+
+1. **xmlstarlet Dependency Check**: The `xml2text.sh` script checks if xmlstarlet is installed and provides installation instructions if it's missing.
+
+2. **XML Processing Errors**: When XML files cannot be processed correctly:
+   - Detailed error messages are displayed
+   - Error information is logged
+   - A placeholder text file is created to maintain workflow continuity
+   - The script continues processing other files
+
+3. **Pipeline Continuity**: The `workspace_na_pipeline.sh` script captures and handles errors from component scripts:
+   - Logs errors to a file for later review
+   - Continues processing other directories even if one fails
+   - Provides clear status messages about each processing step
+
+This robust error handling ensures that the pipeline can process large batches of documents without stopping due to individual file errors.
 
