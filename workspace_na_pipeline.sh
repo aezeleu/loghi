@@ -151,7 +151,7 @@ for subdir in "$INPUT_DIR"/*/ ; do
 
             # Convert XML files to text files using xml2text.sh script
             echo "Converting XML files to text using xml2text.sh..."
-            ./xml2text.sh "$WSL_WORK_DIR/$safe_subdir_name/output" "$WSL_WORK_DIR/$safe_subdir_name/output"
+            ./xml2text.sh "$WSL_WORK_DIR/$safe_subdir_name/page" "$WSL_WORK_DIR/$safe_subdir_name/output"
             XML_CONVERT_STATUS=$?
             
             if [ $XML_CONVERT_STATUS -ne 0 ]; then
