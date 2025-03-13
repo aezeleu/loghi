@@ -1,11 +1,33 @@
 #!/bin/bash
 
-echo "Starting workspace_na_pipeline.sh"
+# Ensure script fails on any error
+set -e
+
+# Get the absolute path of the script directory
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+echo "Script directory: $SCRIPT_DIR"
+
 # Change working directory to script directory
-cd "$(dirname "$0")"
+cd "$SCRIPT_DIR"
+echo "Changed working directory to: $(pwd)"
+
+# Set up logging
+LOG_DIR="${SCRIPT_DIR}/logs"
+mkdir -p "$LOG_DIR"
+TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
+LOG_FILE="${LOG_DIR}/pipeline_${TIMESTAMP}.log"
+ERROR_LOG="${LOG_DIR}/pipeline_errors_${TIMESTAMP}.log"
+
+# Redirect stdout and stderr to both console and log files
+exec 1> >(tee -a "$LOG_FILE")
+exec 2> >(tee -a "$ERROR_LOG")
+
+echo "Starting workspace_na_pipeline.sh at $(date)"
+echo "Running as user: $(whoami)"
+echo "Current PATH: $PATH"
 
 # Configuration options
-REMOVE_PROCESSED_DIRS=false  # Set to false to keep processed directories in the input location
+REMOVE_PROCESSED_DIRS=true  # Set to false to keep processed directories in the input location
 
 # Lock file to ensure single instance
 LOCK_FILE="/tmp/workspace_na_pipeline.lock"
@@ -60,6 +82,18 @@ mkdir -p "$OUTPUT_DIR"
 WSL_WORK_DIR="$(pwd)/temp_workspace"
 echo "WSL_WORK_DIR: $WSL_WORK_DIR"
 mkdir -p "$WSL_WORK_DIR"
+
+# Define the full path to required scripts
+NA_PIPELINE="${SCRIPT_DIR}/na-pipeline.sh"
+XML2TEXT="${SCRIPT_DIR}/xml2text.sh"
+
+# Verify scripts exist and are executable
+for script in "$NA_PIPELINE" "$XML2TEXT"; do
+    if [ ! -x "$script" ]; then
+        echo "Error: Required script not found or not executable: $script"
+        exit 1
+    fi
+done
 
 # Function to check if a file needs processing
 # Returns 0 if file needs processing, 1 if it doesn't
@@ -146,21 +180,24 @@ for subdir in "$INPUT_DIR"/*/ ; do
             cp -r "$subdir" "$WSL_WORK_DIR/$safe_subdir_name"
             echo "Copied $subdir to $WSL_WORK_DIR/$safe_subdir_name"
 
-            # Execute na-pipeline.sh on the copied directory (with quotes to handle spaces)
-            ./na-pipeline.sh "$WSL_WORK_DIR/$safe_subdir_name" "$WSL_WORK_DIR/$safe_subdir_name/output"
+            # Execute na-pipeline.sh on the copied directory with full path
+            echo "Executing na-pipeline.sh on: $WSL_WORK_DIR/$safe_subdir_name"
+            if ! "$NA_PIPELINE" "$WSL_WORK_DIR/$safe_subdir_name" "$WSL_WORK_DIR/$safe_subdir_name/output" 2>> "$ERROR_LOG"; then
+                echo "Warning: na-pipeline.sh failed for directory $safe_subdir_name"
+                echo "$(date): Error in na-pipeline.sh for directory $safe_subdir_name" >> "$ERROR_LOG"
+            fi
 
-            # Convert XML files to text files using xml2text.sh script
-            echo "Converting XML files to text using xml2text.sh..."
-            ./xml2text.sh "$WSL_WORK_DIR/$safe_subdir_name/page" "$WSL_WORK_DIR/$safe_subdir_name/output"
-            XML_CONVERT_STATUS=$?
-            
-            if [ $XML_CONVERT_STATUS -ne 0 ]; then
-                echo "Error: xml2text.sh failed with exit code $XML_CONVERT_STATUS"
-                echo "Continuing with pipeline, but text conversion may be incomplete"
-                # Log the error to a file for later review
-                echo "$(date): Error in xml2text.sh for directory $safe_subdir_name (exit code: $XML_CONVERT_STATUS)" >> "xml_conversion_errors.log"
+            # Check if page directory exists before attempting XML conversion
+            if [ -d "$WSL_WORK_DIR/$safe_subdir_name/page" ]; then
+                echo "Converting XML files to text using xml2text.sh..."
+                if ! "$XML2TEXT" "$WSL_WORK_DIR/$safe_subdir_name/page" "$WSL_WORK_DIR/$safe_subdir_name/output" 2>> "$ERROR_LOG"; then
+                    echo "Error: xml2text.sh failed for directory $safe_subdir_name"
+                    echo "$(date): Error in xml2text.sh for directory $safe_subdir_name" >> "$ERROR_LOG"
+                else
+                    echo "XML to text conversion completed successfully"
+                fi
             else
-                echo "XML to text conversion completed successfully"
+                echo "Note: No 'page' directory found in $WSL_WORK_DIR/$safe_subdir_name - skipping XML conversion"
             fi
 
             # Copy output files to final destination with date suffix
@@ -187,13 +224,35 @@ for subdir in "$INPUT_DIR"/*/ ; do
                 echo "Keeping processed directory in input: $INPUT_DIR/$subdir_name"
             fi
 
-            # Clean up temporary working directory for this subdirectory
-            echo "Cleaning up temporary directory: $WSL_WORK_DIR/$safe_subdir_name"
-            rm -rf "$WSL_WORK_DIR/$safe_subdir_name"
+            # # Clean up temporary working directory for this subdirectory
+            # echo "Cleaning up temporary directory: $WSL_WORK_DIR/$safe_subdir_name"
+            # rm -rf "$WSL_WORK_DIR/$safe_subdir_name"
         else
             echo "Skipping directory $subdir_name as all files are already processed and up to date"
         fi
     fi
 done
+
+# Debug: List contents of WSL working directory
+echo "Debug: Listing contents of WSL working directory ($WSL_WORK_DIR):"
+echo "----------------------------------------"
+if [ -d "$WSL_WORK_DIR" ]; then
+    # First level - directories
+    echo "Top level directories:"
+    ls -la "$WSL_WORK_DIR"
+    
+    # Second level - contents of each subdirectory
+    echo -e "\nContents of each subdirectory:"
+    for dir in "$WSL_WORK_DIR"/*/ ; do
+        if [ -d "$dir" ]; then
+            echo -e "\n>> Directory: ${dir}"
+            ls -la "$dir"
+        fi
+    done
+else
+    echo "Warning: WSL working directory does not exist or is not accessible"
+fi
+echo "----------------------------------------"
+
 
 echo "Processing completed."

@@ -26,7 +26,7 @@ STOPONERROR=1
 BASELINELAYPA=1
 
 # Set the base directory to the project directory
-BASEDIR=/home/default/loghi-main
+BASEDIR=/home/default/loghi
 
 #
 #LAYPAMODEL=/home/rutger/src/laypa-models/general/baseline/config.yaml
