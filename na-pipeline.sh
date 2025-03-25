@@ -25,8 +25,10 @@ STOPONERROR=1
 # set to 1 if you want to enable, 0 otherwise, select just one
 BASELINELAYPA=1
 
-# Set the base directory to the project directory
-BASEDIR=/home/default/loghi
+# # Set the base directory to the project directory
+if [ -z "$BASEDIR" ]; then
+    BASEDIR=/home/default/Companies/Archive/loghi-main # works for Arthur
+fi
 
 #
 #LAYPAMODEL=/home/rutger/src/laypa-models/general/baseline/config.yaml
