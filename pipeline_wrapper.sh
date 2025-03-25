@@ -5,6 +5,7 @@ WORKSPACE_DIR="/home/default/Companies/Archive/loghi-main"
 LOG_DIR="$HOME/pipeline_logs"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 LOCK_FILE="/tmp/workspace_na_pipeline.lock"
+LOCK_TIMEOUT=300  # 5 minutes timeout
 
 # Pipeline Configuration
 REMOVE_PROCESSED_DIRS=false
@@ -57,8 +58,29 @@ export USE2013NAMESPACE
 # Create log directory
 mkdir -p "$LOG_DIR"
 
+# Function to check if lock file is stale
+check_lock() {
+    if [ -f "$LOCK_FILE" ]; then
+        local lock_pid=$(cat "$LOCK_FILE")
+        if ! kill -0 "$lock_pid" 2>/dev/null; then
+            echo "Found stale lock file, removing..." >> "$LOG_DIR/error_$TIMESTAMP.log"
+            rm -f "$LOCK_FILE"
+            return 1
+        fi
+        local lock_time=$(stat -c %Y "$LOCK_FILE")
+        local current_time=$(date +%s)
+        if [ $((current_time - lock_time)) -gt $LOCK_TIMEOUT ]; then
+            echo "Lock file is older than $LOCK_TIMEOUT seconds, removing..." >> "$LOG_DIR/error_$TIMESTAMP.log"
+            rm -f "$LOCK_FILE"
+            return 1
+        fi
+        return 0
+    fi
+    return 1
+}
+
 # Check if script is already running
-if [ -f "$LOCK_FILE" ]; then
+if check_lock; then
     echo "Error: Another instance of the script is already running." >> "$LOG_DIR/error_$TIMESTAMP.log"
     echo "Lock file exists at: $LOCK_FILE" >> "$LOG_DIR/error_$TIMESTAMP.log"
     exit 1
