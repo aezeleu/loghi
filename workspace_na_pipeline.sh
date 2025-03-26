@@ -18,22 +18,89 @@ TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
 LOG_FILE="${LOG_DIR}/pipeline_${TIMESTAMP}.log"
 ERROR_LOG="${LOG_DIR}/pipeline_errors_${TIMESTAMP}.log"
 
-# Redirect stdout and stderr to both console and log files
-exec 1> >(tee -a "$LOG_FILE")
-exec 2> >(tee -a "$ERROR_LOG")
-
-echo "Starting workspace_na_pipeline.sh at $(date)"
-echo "Running as user: $(whoami)"
-echo "Current PATH: $PATH"
-
 # Configuration options
 REMOVE_PROCESSED_DIRS=true  # Set to false to keep processed directories in the input location
+MAX_OPERATION_TIMEOUT=1800  # 30 minutes timeout for individual operations
+CHECK_INTERVAL=30          # Check every 30 seconds
+
+# Function to run command with timeout
+run_with_timeout() {
+    local cmd="$1"
+    local timeout="$2"
+    local operation="$3"
+    local start_time=$(date +%s)
+    
+    # Start the command in background
+    $cmd &
+    local cmd_pid=$!
+    
+    # Monitor the command
+    while kill -0 "$cmd_pid" 2>/dev/null; do
+        local current_time=$(date +%s)
+        local elapsed=$((current_time - start_time))
+        
+        # Check if command has exceeded timeout
+        if [ $elapsed -gt "$timeout" ]; then
+            echo "Error: Operation '$operation' timed out after ${timeout} seconds" >> "$ERROR_LOG"
+            kill -TERM "$cmd_pid" 2>/dev/null
+            sleep 5
+            
+            # If still running, try SIGINT
+            if kill -0 "$cmd_pid" 2>/dev/null; then
+                kill -INT "$cmd_pid" 2>/dev/null
+                sleep 5
+            fi
+            
+            # If still running, force kill
+            if kill -0 "$cmd_pid" 2>/dev/null; then
+                kill -9 "$cmd_pid" 2>/dev/null
+                echo "Force killed operation '$operation'" >> "$ERROR_LOG"
+            fi
+            
+            return 1
+        fi
+        
+        # Check if process is using CPU
+        local cpu_usage=$(ps -p "$cmd_pid" -o %cpu | tail -n 1)
+        if [ "$cpu_usage" = "0.0" ]; then
+            echo "Warning: Operation '$operation' is not using CPU" >> "$ERROR_LOG"
+        fi
+        
+        sleep $CHECK_INTERVAL
+    done
+    
+    # Get the exit status
+    wait $cmd_pid
+    return $?
+}
 
 # Lock file to ensure single instance
 LOCK_FILE="/tmp/workspace_na_pipeline.lock"
+LOCK_TIMEOUT=300  # 5 minutes timeout for stale locks
+
+# Function to check if lock file is stale
+check_lock() {
+    if [ -f "$LOCK_FILE" ]; then
+        local lock_pid=$(cat "$LOCK_FILE")
+        if ! kill -0 "$lock_pid" 2>/dev/null; then
+            echo "Found stale lock file, removing..."
+            rm -f "$LOCK_FILE"
+            return 1
+        fi
+        local lock_time=$(stat -c %Y "$LOCK_FILE")
+        local current_time=$(date +%s)
+        if [ $((current_time - lock_time)) -gt $LOCK_TIMEOUT ]; then
+            echo "Lock file is older than $LOCK_TIMEOUT seconds, removing..."
+            rm -f "$LOCK_FILE"
+            return 1
+        fi
+        return 0
+    fi
+    return 1
+}
 
 # Check if script is already running
-if [ -f "$LOCK_FILE" ]; then
+if check_lock; then
     echo "Error: Another instance of the script is already running."
     echo "Lock file exists at: $LOCK_FILE"
     exit 1
@@ -42,8 +109,15 @@ fi
 # Create lock file
 echo $$ > "$LOCK_FILE"
 
+# Function to cleanup lock file
+cleanup_lock() {
+    echo "Cleaning up lock file..."
+    rm -f "$LOCK_FILE"
+    echo "Lock file cleaned up"
+}
+
 # Ensure lock file is removed when script exits
-trap "rm -f $LOCK_FILE; exit" INT TERM EXIT
+trap 'cleanup_lock; cleanup_temp_workspace; exit' INT TERM EXIT
 
 # # Add a 5 minute delay (for quick testing)
 # echo "Waiting for 5 minutes..."
@@ -78,10 +152,9 @@ fi
 # Create OUTPUT_DIR if it does not exist
 mkdir -p "$OUTPUT_DIR"
 
-# Define WSL work directory
-WSL_WORK_DIR="$(pwd)/temp_workspace"
-echo "WSL_WORK_DIR: $WSL_WORK_DIR"
-mkdir -p "$WSL_WORK_DIR"
+# Create temporary workspace
+WSL_WORK_DIR="${SCRIPT_DIR}/temp_workspace"
+mkdir -p "${WSL_WORK_DIR}"
 
 # Define the full path to required scripts
 NA_PIPELINE="${SCRIPT_DIR}/na-pipeline.sh"
@@ -147,112 +220,122 @@ copy_with_date_suffix() {
     # Create the new filename with date suffix
     local new_filename="${name_without_ext}_${current_date}.${extension}"
     
-    # Copy the file
-    cp "$source_file" "$dest_dir/$new_filename"
-    echo "Copied $source_file to $dest_dir/$new_filename"
+    # Create destination directory if it doesn't exist
+    mkdir -p "${dest_dir}"
+    
+    # Copy the file with proper path handling
+    echo "Copying from ${source_file} to ${dest_dir}/${new_filename}"
+    if ! cp "${source_file}" "${dest_dir}/${new_filename}"; then
+        echo "Error: Failed to copy ${source_file} to ${dest_dir}/${new_filename}"
+        return 1
+    fi
+    
+    echo "Successfully copied ${source_file} to ${dest_dir}/${new_filename}"
+    return 0
 }
 
-# Process all subdirectories in INPUT_DIR
-for subdir in "$INPUT_DIR"/*/ ; do
-    if [ -d "$subdir" ]; then
-        subdir_name=$(basename "$subdir")
-        echo "Processing directory: $subdir_name"
+# Function to cleanup temp workspace
+cleanup_temp_workspace() {
+    echo "Cleaning up temporary workspace..."
+    if [ -d "$WSL_WORK_DIR" ]; then
+        rm -rf "$WSL_WORK_DIR"
+        echo "Temporary workspace cleaned up"
+    fi
+}
 
-        # Create a sanitized directory name (replace spaces with underscores)
-        safe_subdir_name=$(echo "$subdir_name" | tr ' ' '_')
-        
-        # Create output directory for this subdirectory
-        mkdir -p "$OUTPUT_DIR/$safe_subdir_name"
-        
-        # Check if files need processing
-        process_directory=false
-        for file in "$subdir"/*; do
-            if [ -f "$file" ]; then
-                if needs_processing "$file" "$OUTPUT_DIR/$safe_subdir_name"; then
-                    process_directory=true
-                    break
-                fi
+# Ensure cleanup happens on script exit
+trap 'cleanup_temp_workspace' EXIT
+
+# Process each directory in the input
+for dir in "${INPUT_DIR}"/*/ ; do
+    if [ ! -d "${dir}" ]; then
+        continue
+    fi
+    
+    dir_name=$(basename "${dir}")
+    echo "Processing directory: ${dir_name}"
+    
+    # Create workspace directory
+    workspace_dir="${WSL_WORK_DIR}/${dir_name}"
+    mkdir -p "${workspace_dir}"
+    
+    # Copy files to workspace
+    echo "Copying files from ${dir} to ${workspace_dir}"
+    if ! cp -r "${dir}"* "${workspace_dir}/"; then
+        echo "Error: Failed to copy directory ${dir} to workspace"
+        continue
+    fi
+    
+    # Create a sanitized directory name (replace spaces with underscores)
+    safe_subdir_name=$(echo "$dir_name" | tr ' ' '_')
+    
+    # Create output directory for this subdirectory
+    output_subdir="${OUTPUT_DIR}/${safe_subdir_name}"
+    mkdir -p "${output_subdir}"
+    
+    # Check if files need processing
+    process_directory=false
+    for file in "${dir}"/*; do
+        if [ -f "$file" ]; then
+            if needs_processing "$file" "${output_subdir}"; then
+                process_directory=true
+                break
             fi
-        done
-        
-        if [ "$process_directory" = true ]; then
-            # Copy subdirectory to WSL work directory with sanitized name
-            cp -r "$subdir" "$WSL_WORK_DIR/$safe_subdir_name"
-            echo "Copied $subdir to $WSL_WORK_DIR/$safe_subdir_name"
-
-            # Execute na-pipeline.sh on the copied directory with full path
-            echo "Executing na-pipeline.sh on: $WSL_WORK_DIR/$safe_subdir_name"
-            if ! "$NA_PIPELINE" "$WSL_WORK_DIR/$safe_subdir_name" "$WSL_WORK_DIR/$safe_subdir_name/output" 2>> "$ERROR_LOG"; then
-                echo "Warning: na-pipeline.sh failed for directory $safe_subdir_name"
-                echo "$(date): Error in na-pipeline.sh for directory $safe_subdir_name" >> "$ERROR_LOG"
-            fi
-
-            # Check if page directory exists before attempting XML conversion
-            if [ -d "$WSL_WORK_DIR/$safe_subdir_name/page" ]; then
-                echo "Converting XML files to text using xml2text.sh..."
-                if ! "$XML2TEXT" "$WSL_WORK_DIR/$safe_subdir_name/page" "$WSL_WORK_DIR/$safe_subdir_name/output" 2>> "$ERROR_LOG"; then
-                    echo "Error: xml2text.sh failed for directory $safe_subdir_name"
-                    echo "$(date): Error in xml2text.sh for directory $safe_subdir_name" >> "$ERROR_LOG"
-                else
-                    echo "XML to text conversion completed successfully"
-                fi
-            else
-                echo "Note: No 'page' directory found in $WSL_WORK_DIR/$safe_subdir_name - skipping XML conversion"
-            fi
-
-            # Copy output files to final destination with date suffix
-            if [ -d "$WSL_WORK_DIR/$safe_subdir_name/output" ]; then
-                mkdir -p "$OUTPUT_DIR/$safe_subdir_name"
-                
-                # Copy each file with date suffix
-                for file in "$WSL_WORK_DIR/$safe_subdir_name/output/"*; do
-                    if [ -f "$file" ]; then
-                        copy_with_date_suffix "$file" "$OUTPUT_DIR/$safe_subdir_name"
-                    fi
-                done
-                
-                echo "Copied output to $OUTPUT_DIR/$safe_subdir_name with date suffix"
-            else
-                echo "Warning: Output directory not found in $WSL_WORK_DIR/$safe_subdir_name"
-            fi
-
-            # Remove processed subdirectory from input directory if configured to do so
-            if [ "$REMOVE_PROCESSED_DIRS" = true ]; then
-                rm -rf "$INPUT_DIR/$subdir_name"
-                echo "Removed processed directory from input: $INPUT_DIR/$subdir_name"
-            else
-                echo "Keeping processed directory in input: $INPUT_DIR/$subdir_name"
-            fi
-
-            # # Clean up temporary working directory for this subdirectory
-            # echo "Cleaning up temporary directory: $WSL_WORK_DIR/$safe_subdir_name"
-            # rm -rf "$WSL_WORK_DIR/$safe_subdir_name"
-        else
-            echo "Skipping directory $subdir_name as all files are already processed and up to date"
         fi
+    done
+    
+    if [ "$process_directory" = true ]; then
+        # Execute na-pipeline.sh on the copied directory with proper escaping
+        echo "Executing na-pipeline.sh on: ${workspace_dir}"
+        if ! run_with_timeout "${NA_PIPELINE} ${workspace_dir} ${workspace_dir}/output" "$MAX_OPERATION_TIMEOUT" "na-pipeline.sh"; then
+            echo "Error: na-pipeline.sh failed for directory ${safe_subdir_name}"
+            echo "$(date): Error in na-pipeline.sh for directory ${safe_subdir_name}" >> "$ERROR_LOG"
+            continue
+        fi
+
+        # Check if page directory exists before attempting XML conversion
+        if [ -d "${workspace_dir}/page" ]; then
+            echo "Converting XML files to text using xml2text.sh..."
+            if ! run_with_timeout "${XML2TEXT} ${workspace_dir}/page ${workspace_dir}/output" 900 "xml2text.sh"; then
+                echo "Error: xml2text.sh failed for directory ${safe_subdir_name}"
+                echo "$(date): Error in xml2text.sh for directory ${safe_subdir_name}" >> "$ERROR_LOG"
+            else
+                echo "XML to text conversion completed successfully"
+            fi
+        else
+            echo "Note: No 'page' directory found in ${workspace_dir} - skipping XML conversion"
+        fi
+
+        # Copy output files to final destination with date suffix
+        if [ -d "${workspace_dir}/output" ]; then
+            # Copy each file with date suffix
+            for file in "${workspace_dir}/output/"*; do
+                if [ -f "$file" ]; then
+                    copy_with_date_suffix "$file" "${output_subdir}"
+                fi
+            done
+            
+            echo "Copied output to ${output_subdir} with date suffix"
+        else
+            echo "Warning: Output directory not found in ${workspace_dir}"
+        fi
+
+        # Only remove processed directory if processing was successful
+        if [ "$REMOVE_PROCESSED_DIRS" = true ] && [ -d "${workspace_dir}/output" ]; then
+            if ! run_with_timeout "rm -rf \"${INPUT_DIR}/${dir_name}\"" 300 "Remove processed directory"; then
+                echo "Warning: Failed to remove processed directory: ${INPUT_DIR}/${dir_name}"
+            else
+                echo "Removed processed directory from input: ${INPUT_DIR}/${dir_name}"
+            fi
+        else
+            echo "Keeping processed directory in input: ${INPUT_DIR}/${dir_name}"
+        fi
+    else
+        echo "Skipping directory ${dir_name} as all files are already processed and up to date"
     fi
 done
 
-# Debug: List contents of WSL working directory
-echo "Debug: Listing contents of WSL working directory ($WSL_WORK_DIR):"
-echo "----------------------------------------"
-if [ -d "$WSL_WORK_DIR" ]; then
-    # First level - directories
-    echo "Top level directories:"
-    ls -la "$WSL_WORK_DIR"
-    
-    # Second level - contents of each subdirectory
-    echo -e "\nContents of each subdirectory:"
-    for dir in "$WSL_WORK_DIR"/*/ ; do
-        if [ -d "$dir" ]; then
-            echo -e "\n>> Directory: ${dir}"
-            ls -la "$dir"
-        fi
-    done
-else
-    echo "Warning: WSL working directory does not exist or is not accessible"
-fi
-echo "----------------------------------------"
-
+# Clean up temp workspace at the end
+cleanup_temp_workspace
 
 echo "Processing completed."

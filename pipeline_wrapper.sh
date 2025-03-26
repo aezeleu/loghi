@@ -1,76 +1,48 @@
 #!/bin/bash
 
-# Global Configuration
-WORKSPACE_DIR="/home/default/Companies/Archive/loghi-main"
-LOG_DIR="$HOME/pipeline_logs"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-LOCK_FILE="/tmp/workspace_na_pipeline.lock"
-LOCK_TIMEOUT=300  # 5 minutes timeout
+# Ensure script fails on any error
+set -e
 
-# Pipeline Configuration
-REMOVE_PROCESSED_DIRS=false
-STOPONERROR=1
-BASELINELAYPA=1
-HTRLOGHI=1
-RECALCULATEREADINGORDER=1
-RECALCULATEREADINGORDERBORDERMARGIN=50
-RECALCULATEREADINGORDERCLEANBORDERS=0
-RECALCULATEREADINGORDERTHREADS=4
-DETECTLANGUAGE=1
-SPLITWORDS=1
-BEAMWIDTH=1
-GPU=0
+# Get the absolute path of the script directory
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+echo "Script directory: $SCRIPT_DIR"
 
-# Docker Configuration
-VERSION=1.3.7
-DOCKERLOGHITOOLING="loghi/docker.loghi-tooling:$VERSION"
-DOCKERLAYPA="loghi/docker.laypa:$VERSION"
-DOCKERLOGHIHTR="loghi/docker.htr:$VERSION"
-USE2013NAMESPACE=" -use_2013_namespace "
+# Change working directory to script directory
+cd "$SCRIPT_DIR"
+echo "Changed working directory to: $(pwd)"
 
-# Model Paths
-BASEDIR="$WORKSPACE_DIR"
-LAYPAMODEL="$BASEDIR/laypa/general/baseline/config.yaml"
-LAYPAMODELWEIGHTS="$BASEDIR/laypa/general/baseline/model_best_mIoU.pth"
-HTRLOGHIMODEL="$BASEDIR/loghi-htr/generic-2023-02-15"
-
-# Export variables for child scripts
-export BASEDIR
-export LAYPAMODEL
-export LAYPAMODELWEIGHTS
-export HTRLOGHIMODEL
-export STOPONERROR
-export BASELINELAYPA
-export HTRLOGHI
-export RECALCULATEREADINGORDER
-export RECALCULATEREADINGORDERBORDERMARGIN
-export RECALCULATEREADINGORDERCLEANBORDERS
-export RECALCULATEREADINGORDERTHREADS
-export DETECTLANGUAGE
-export SPLITWORDS
-export BEAMWIDTH
-export GPU
-export DOCKERLOGHITOOLING
-export DOCKERLAYPA
-export DOCKERLOGHIHTR
-export USE2013NAMESPACE
-
-# Create log directory
+# Set up logging
+LOG_DIR="${SCRIPT_DIR}/logs"
 mkdir -p "$LOG_DIR"
+TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
+LOG_FILE="${LOG_DIR}/wrapper_${TIMESTAMP}.log"
+ERROR_LOG="${LOG_DIR}/wrapper_errors_${TIMESTAMP}.log"
+
+# Redirect stdout and stderr to both console and log files
+exec 1> >(tee -a "$LOG_FILE")
+exec 2> >(tee -a "$ERROR_LOG")
+
+echo "Starting pipeline_wrapper.sh at $(date)"
+echo "Running as user: $(whoami)"
+echo "Current PATH: $PATH"
+
+# Lock file to ensure single instance
+LOCK_FILE="/tmp/pipeline_wrapper.lock"
+LOCK_TIMEOUT=300  # 5 minutes timeout for stale locks
 
 # Function to check if lock file is stale
 check_lock() {
     if [ -f "$LOCK_FILE" ]; then
         local lock_pid=$(cat "$LOCK_FILE")
         if ! kill -0 "$lock_pid" 2>/dev/null; then
-            echo "Found stale lock file, removing..." >> "$LOG_DIR/error_$TIMESTAMP.log"
+            echo "Found stale lock file, removing..."
             rm -f "$LOCK_FILE"
             return 1
         fi
         local lock_time=$(stat -c %Y "$LOCK_FILE")
         local current_time=$(date +%s)
         if [ $((current_time - lock_time)) -gt $LOCK_TIMEOUT ]; then
-            echo "Lock file is older than $LOCK_TIMEOUT seconds, removing..." >> "$LOG_DIR/error_$TIMESTAMP.log"
+            echo "Lock file is older than $LOCK_TIMEOUT seconds, removing..."
             rm -f "$LOCK_FILE"
             return 1
         fi
@@ -79,50 +51,55 @@ check_lock() {
     return 1
 }
 
+# Function to cleanup lock file
+cleanup_lock() {
+    echo "Cleaning up lock file..."
+    rm -f "$LOCK_FILE"
+    echo "Lock file cleaned up"
+}
+
 # Check if script is already running
 if check_lock; then
-    echo "Error: Another instance of the script is already running." >> "$LOG_DIR/error_$TIMESTAMP.log"
-    echo "Lock file exists at: $LOCK_FILE" >> "$LOG_DIR/error_$TIMESTAMP.log"
+    echo "Error: Another instance of pipeline_wrapper.sh is already running"
     exit 1
 fi
 
 # Create lock file
 echo $$ > "$LOCK_FILE"
 
-# Ensure lock file is removed when script exits
-trap "rm -f $LOCK_FILE; exit" INT TERM EXIT
+# Ensure lock file is removed on script exit
+trap 'cleanup_lock; exit' INT TERM EXIT
 
-# Change to workspace directory
-cd "$WORKSPACE_DIR" || {
-    echo "Error: Cannot change to workspace directory" >> "$LOG_DIR/error_$TIMESTAMP.log"
-    exit 1
-}
-
-# Check dependencies
-if ! command -v xmlstarlet &> /dev/null; then
-    echo "Error: xmlstarlet is not installed" >> "$LOG_DIR/error_$TIMESTAMP.log"
+# Check if required arguments are provided
+if [ "$#" -ne 2 ]; then
+    echo "Usage: $0 <input_directory> <output_directory>"
+    echo "Error: Missing required arguments"
     exit 1
 fi
 
-# Pull latest changes
-echo "Pulling latest changes..." >> "$LOG_DIR/git_pull_$TIMESTAMP.log"
-git pull origin main >> "$LOG_DIR/git_pull_$TIMESTAMP.log" 2>&1
+INPUT_DIR="$1"
+OUTPUT_DIR="$2"
 
-# Run health check
-if [ -f "./health-check.sh" ]; then
-    echo "Running health check..." >> "$LOG_DIR/health_check_$TIMESTAMP.log"
-    ./health-check.sh >> "$LOG_DIR/health_check_$TIMESTAMP.log" 2>&1
+echo "Input directory: $INPUT_DIR"
+echo "Output directory: $OUTPUT_DIR"
+
+# Check if input directory exists
+if [ ! -d "$INPUT_DIR" ]; then
+    echo "Error: Input directory does not exist: $INPUT_DIR"
+    exit 1
 fi
 
-# Process pipeline
-echo "Starting pipeline processing..." >> "$LOG_DIR/pipeline_$TIMESTAMP.log"
-./workspace_na_pipeline.sh "$1" "$2" >> "$LOG_DIR/pipeline_$TIMESTAMP.log" 2>&1
+# Check if output directory exists, create if it doesn't
+if [ ! -d "$OUTPUT_DIR" ]; then
+    echo "Creating output directory: $OUTPUT_DIR"
+    mkdir -p "$OUTPUT_DIR"
+fi
 
-# Generate summary
-echo "Generating summary..." >> "$LOG_DIR/summary_$TIMESTAMP.log"
-git log --since="2 minutes ago" --pretty=format:"%h - %s (%cr)" >> "$LOG_DIR/summary_$TIMESTAMP.log"
+# Run the main pipeline script
+echo "Starting workspace_na_pipeline.sh..."
+if ! bash -c "./workspace_na_pipeline.sh \"$INPUT_DIR\" \"$OUTPUT_DIR\""; then
+    echo "Error: workspace_na_pipeline.sh failed"
+    exit 1
+fi
 
-# Cleanup
-rm -f "$LOCK_FILE"
-
-echo "Pipeline completed successfully" >> "$LOG_DIR/pipeline_$TIMESTAMP.log" 
+echo "Pipeline completed successfully at $(date)" 
