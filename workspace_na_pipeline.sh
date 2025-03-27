@@ -339,16 +339,31 @@ for dir in "${INPUT_DIR}"/*/ ; do
                     # Check if source directory still contains files
                     if [ "$(ls -A "${source_dir}")" ]; then
                         echo "Source directory exists and contains files, proceeding with removal..."
-                        if ! run_with_timeout "rm -rf \"${source_dir}\"" 300 "Remove processed directory"; then
-                            echo "Warning: Failed to remove processed directory: ${source_dir}"
+                        echo "Attempting to remove: ${source_dir}"
+                        
+                        # Try direct removal first
+                        if rm -rf "${source_dir}"; then
+                            echo "Successfully removed directory using direct rm command"
                         else
-                            echo "Successfully removed processed directory: ${source_dir}"
-                            # Verify removal
-                            if [ -d "${source_dir}" ]; then
-                                echo "Warning: Directory still exists after removal attempt: ${source_dir}"
+                            echo "Direct removal failed, trying with Windows path..."
+                            # Try with Windows path format
+                            windows_path=$(echo "${source_dir}" | sed 's/\/mnt\//\/mnt\/i\//')
+                            if rm -rf "${windows_path}"; then
+                                echo "Successfully removed directory using Windows path"
                             else
-                                echo "Verified: Directory successfully removed: ${source_dir}"
+                                echo "Warning: Failed to remove directory using both methods"
+                                echo "Source directory: ${source_dir}"
+                                echo "Windows path: ${windows_path}"
                             fi
+                        fi
+                        
+                        # Verify removal
+                        if [ -d "${source_dir}" ]; then
+                            echo "Warning: Directory still exists after removal attempt: ${source_dir}"
+                            echo "Directory contents:"
+                            ls -la "${source_dir}"
+                        else
+                            echo "Verified: Directory successfully removed: ${source_dir}"
                         fi
                     else
                         echo "Source directory is empty, no need to remove"
