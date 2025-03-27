@@ -237,6 +237,8 @@ REMOVE_PROCESSED_DIRS=true  # Set to false to keep processed directories in the 
 - `REMOVE_PROCESSED_DIRS`: Controls whether processed directories are removed from the input location
   - `true`: Removes processed directories after successful processing (default)
   - `false`: Keeps processed directories in the input location
+  - Note: Directories are only removed if processing was successful (output files exist)
+  - Warning: Directory removal is skipped if no output files are found
 
 ### File Processing Features
 
@@ -518,4 +520,32 @@ mkdir -p fonts text output
    - Ensure sufficient disk space
 
 For more detailed troubleshooting information, see [Troubleshooting Guide](troubleshooting.md).
+
+## Health Check
+
+The installation includes a health check system that verifies:
+- Required tools and dependencies
+- Docker configuration and permissions
+- Required directories and permissions
+- CRON job configuration
+- Docker image availability
+
+You can run the health check manually at any time:
+```bash
+./health-check.sh
+```
+
+The health check is automatically run after installation. If any issues are found, the script will provide detailed information about what needs to be fixed.
+
+### Common Health Check Issues
+
+1. **Docker Permissions**
+   - Solution: Log out and log back in after installation
+   - Alternative: Run `newgrp docker` to update group membership
+
+2. **Missing Docker Images**
+   - Solution: Run `docker pull loghi/docker.laypa && docker pull loghi/docker.htr && docker pull loghi/docker.loghi-tooling`
+
+3. **Directory Permissions**
+   - Solution: Check ownership with `ls -la` and fix with `chmod` if needed
 

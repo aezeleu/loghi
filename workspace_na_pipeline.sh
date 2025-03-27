@@ -320,15 +320,20 @@ for dir in "${INPUT_DIR}"/*/ ; do
             echo "Warning: Output directory not found in ${workspace_dir}"
         fi
 
-        # Only remove processed directory if processing was successful
-        if [ "$REMOVE_PROCESSED_DIRS" = true ] && [ -d "${workspace_dir}/output" ]; then
-            if ! run_with_timeout "rm -rf \"${INPUT_DIR}/${dir_name}\"" 300 "Remove processed directory"; then
-                echo "Warning: Failed to remove processed directory: ${INPUT_DIR}/${dir_name}"
+        # Only remove processed directory if processing was successful and REMOVE_PROCESSED_DIRS is true
+        if [ "$REMOVE_PROCESSED_DIRS" = true ]; then
+            # Check if processing was successful by looking for output files
+            if [ -f "${output_subdir}/${dir_name}_${current_date}.xml" ] || [ -f "${output_subdir}/${dir_name}_${current_date}.txt" ]; then
+                if ! run_with_timeout "rm -rf \"${INPUT_DIR}/${dir_name}\"" 300 "Remove processed directory"; then
+                    echo "Warning: Failed to remove processed directory: ${INPUT_DIR}/${dir_name}"
+                else
+                    echo "Removed processed directory from input: ${INPUT_DIR}/${dir_name}"
+                fi
             else
-                echo "Removed processed directory from input: ${INPUT_DIR}/${dir_name}"
+                echo "Skipping directory removal: No output files found for ${dir_name}"
             fi
         else
-            echo "Keeping processed directory in input: ${INPUT_DIR}/${dir_name}"
+            echo "Directory removal is disabled (REMOVE_PROCESSED_DIRS=false)"
         fi
     else
         echo "Skipping directory ${dir_name} as all files are already processed and up to date"
