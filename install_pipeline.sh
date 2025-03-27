@@ -121,6 +121,12 @@ setup_permissions
 # Set up CRON job
 setup_cron
 
-echo "Installation completed successfully!"
-echo "Please ensure all required model files are present in the correct locations."
-echo "You may need to log out and back in for all changes to take effect." 
+echo "Running health check..."
+if "$WORKSPACE_DIR/health-check.sh"; then
+    echo "Installation completed successfully!"
+    echo "Please ensure all required model files are present in the correct locations."
+    echo "You may need to log out and back in for all changes to take effect."
+else
+    echo "Installation completed with warnings. Please review the health check output above."
+    exit 1
+fi 
