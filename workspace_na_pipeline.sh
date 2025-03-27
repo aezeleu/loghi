@@ -322,15 +322,37 @@ for dir in "${INPUT_DIR}"/*/ ; do
 
         # Only remove processed directory if processing was successful and REMOVE_PROCESSED_DIRS is true
         if [ "$REMOVE_PROCESSED_DIRS" = true ]; then
+            echo "Checking for successful processing in ${output_subdir}"
+            echo "Looking for files: ${dir_name}_${current_date}.xml or ${dir_name}_${current_date}.txt"
+            
             # Check if processing was successful by looking for output files
             if [ -f "${output_subdir}/${dir_name}_${current_date}.xml" ] || [ -f "${output_subdir}/${dir_name}_${current_date}.txt" ]; then
-                if ! run_with_timeout "rm -rf \"${INPUT_DIR}/${dir_name}\"" 300 "Remove processed directory"; then
-                    echo "Warning: Failed to remove processed directory: ${INPUT_DIR}/${dir_name}"
+                # Get the full path of the source directory
+                source_dir="${INPUT_DIR}/${dir_name}"
+                echo "Found output files. Attempting to remove source directory: ${source_dir}"
+                
+                # Verify source directory exists before attempting removal
+                if [ ! -d "${source_dir}" ]; then
+                    echo "Warning: Source directory does not exist: ${source_dir}"
                 else
-                    echo "Removed processed directory from input: ${INPUT_DIR}/${dir_name}"
+                    echo "Source directory exists, proceeding with removal..."
+                    if ! run_with_timeout "rm -rf \"${source_dir}\"" 300 "Remove processed directory"; then
+                        echo "Warning: Failed to remove processed directory: ${source_dir}"
+                    else
+                        echo "Successfully removed processed directory: ${source_dir}"
+                        # Verify removal
+                        if [ -d "${source_dir}" ]; then
+                            echo "Warning: Directory still exists after removal attempt: ${source_dir}"
+                        else
+                            echo "Verified: Directory successfully removed: ${source_dir}"
+                        fi
+                    fi
                 fi
             else
                 echo "Skipping directory removal: No output files found for ${dir_name}"
+                echo "Checked for:"
+                echo "  - ${output_subdir}/${dir_name}_${current_date}.xml"
+                echo "  - ${output_subdir}/${dir_name}_${current_date}.txt"
             fi
         else
             echo "Directory removal is disabled (REMOVE_PROCESSED_DIRS=false)"
