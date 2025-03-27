@@ -332,20 +332,26 @@ for dir in "${INPUT_DIR}"/*/ ; do
                 echo "Found ${processed_files} processed files from today. Attempting to remove source directory..."
                 source_dir="${INPUT_DIR}/${dir_name}"
                 
+                # Verify source directory exists and is not empty
                 if [ ! -d "${source_dir}" ]; then
                     echo "Warning: Source directory does not exist: ${source_dir}"
                 else
-                    echo "Source directory exists, proceeding with removal..."
-                    if ! run_with_timeout "rm -rf \"${source_dir}\"" 300 "Remove processed directory"; then
-                        echo "Warning: Failed to remove processed directory: ${source_dir}"
-                    else
-                        echo "Successfully removed processed directory: ${source_dir}"
-                        # Verify removal
-                        if [ -d "${source_dir}" ]; then
-                            echo "Warning: Directory still exists after removal attempt: ${source_dir}"
+                    # Check if source directory still contains files
+                    if [ "$(ls -A "${source_dir}")" ]; then
+                        echo "Source directory exists and contains files, proceeding with removal..."
+                        if ! run_with_timeout "rm -rf \"${source_dir}\"" 300 "Remove processed directory"; then
+                            echo "Warning: Failed to remove processed directory: ${source_dir}"
                         else
-                            echo "Verified: Directory successfully removed: ${source_dir}"
+                            echo "Successfully removed processed directory: ${source_dir}"
+                            # Verify removal
+                            if [ -d "${source_dir}" ]; then
+                                echo "Warning: Directory still exists after removal attempt: ${source_dir}"
+                            else
+                                echo "Verified: Directory successfully removed: ${source_dir}"
+                            fi
                         fi
+                    else
+                        echo "Source directory is empty, no need to remove"
                     fi
                 fi
             else
