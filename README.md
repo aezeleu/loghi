@@ -237,6 +237,8 @@ REMOVE_PROCESSED_DIRS=true  # Set to false to keep processed directories in the 
 - `REMOVE_PROCESSED_DIRS`: Controls whether processed directories are removed from the input location
   - `true`: Removes processed directories after successful processing (default)
   - `false`: Keeps processed directories in the input location
+  - Note: Directories are only removed if processing was successful (output files exist)
+  - Warning: Directory removal is skipped if no output files are found
 
 ### File Processing Features
 
@@ -408,4 +410,142 @@ The scripts in this repository include comprehensive error handling to ensure ro
    - Provides clear status messages about each processing step
 
 This robust error handling ensures that the pipeline can process large batches of documents without stopping due to individual file errors.
+
+## Synthetic Image Generation
+
+The repository includes a script `generate-images.sh` for generating synthetic images for testing purposes. This script uses the Loghi tooling Docker image to create sample images with configurable parameters.
+
+### Usage
+
+```bash
+./generate-images.sh [options]
+```
+
+Options:
+- `--fonts <dir>`: Fonts directory (default: ./fonts)
+- `--text <dir>`: Text directory (default: ./text)
+- `--output <dir>`: Output directory (default: ./output)
+- `--max-files <n>`: Maximum number of files to generate (default: 10)
+- `--quality <dpi>`: Image quality in DPI (default: 300)
+
+### Example
+
+```bash
+./generate-images.sh --fonts /path/to/fonts --text /path/to/text --output /path/to/output --quality 600
+```
+
+### Configuration
+
+The script includes several configurable parameters:
+- `IMAGE_QUALITY`: DPI of generated images (default: 300)
+- `BACKGROUND_COLOR`: Background color (default: white)
+- `TEXT_COLOR`: Text color (default: black)
+- `FONT_SIZE`: Font size (default: 12)
+- `NOISE_LEVEL`: Salt and pepper noise level (default: 0.1)
+
+## Automated Processing with CRON
+
+For automated processing of new files, you can set up a CRON job using the `pipeline_wrapper.sh` script. This script includes:
+- Lock file management to prevent multiple instances
+- Error handling and logging
+- Automatic cleanup of temporary files
+- Support for special characters in paths
+
+### Setup
+
+1. Make the script executable:
+```bash
+chmod +x pipeline_wrapper.sh
+```
+
+2. Add a CRON entry:
+```bash
+*/5 * * * * /path/to/pipeline_wrapper.sh <input_dir> <output_dir> >> /path/to/logs/cron.log 2>&1
+```
+
+For detailed CRON setup instructions, see [CRON Setup Guide](cron_setup_guide.md).
+
+## Testing
+
+### Test Data Generation
+
+1. Create test directories:
+```bash
+mkdir -p fonts text output
+```
+
+2. Add sample fonts and text files:
+```bash
+# Add fonts to fonts directory
+# Add text files to text directory
+```
+
+3. Generate test images:
+```bash
+./generate-images.sh --output output/test_images
+```
+
+4. Process the generated images:
+```bash
+./workspace_na_pipeline.sh output/test_images output/results
+```
+
+### Real-world Testing
+
+1. Prepare a directory with real-world images
+2. Run the pipeline:
+```bash
+./workspace_na_pipeline.sh /path/to/real/images /path/to/output
+```
+
+3. Check the results in the output directory
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Path Issues**
+   - Ensure all paths are properly escaped
+   - Check for special characters in directory names
+   - Verify directory permissions
+
+2. **Docker Issues**
+   - Verify Docker is running
+   - Check Docker image availability
+   - Ensure proper permissions for Docker access
+
+3. **Processing Issues**
+   - Check log files in the logs directory
+   - Verify input file formats
+   - Ensure sufficient disk space
+
+For more detailed troubleshooting information, see [Troubleshooting Guide](troubleshooting.md).
+
+## Health Check
+
+The installation includes a health check system that verifies:
+- Required tools and dependencies
+- Docker configuration and permissions
+- Required directories and permissions
+- CRON job configuration
+- Docker image availability
+
+You can run the health check manually at any time:
+```bash
+./health-check.sh
+```
+
+The health check is automatically run after installation. If any issues are found, the script will provide detailed information about what needs to be fixed.
+
+### Common Health Check Issues
+
+1. **Docker Permissions**
+   - Solution: Log out and log back in after installation
+   - Alternative: Run `newgrp docker` to update group membership
+
+2. **Missing Docker Images**
+   - Solution: Run `docker pull loghi/docker.laypa && docker pull loghi/docker.htr && docker pull loghi/docker.loghi-tooling`
+
+3. **Directory Permissions**
+   - Solution: Check ownership with `ls -la` and fix with `chmod` if needed
 

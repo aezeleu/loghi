@@ -25,8 +25,10 @@ STOPONERROR=1
 # set to 1 if you want to enable, 0 otherwise, select just one
 BASELINELAYPA=1
 
-# Set the base directory to the project directory
-BASEDIR=/home/default/loghi-main
+# # Set the base directory to the project directory
+if [ -z "$BASEDIR" ]; then
+    BASEDIR=/home/default/Companies/Archive/loghi-main # works for Arthur
+fi
 
 #
 #LAYPAMODEL=/home/rutger/src/laypa-models/general/baseline/config.yaml
@@ -115,94 +117,91 @@ then
                 mkdir -p $output_dir
         fi
 
-	echo docker run $DOCKERGPUPARAMS --rm -it -u $(id -u ${USER}):$(id -g ${USER}) -m 32000m --shm-size 10240m -v $LAYPADIR:$LAYPADIR -v $input_dir:$input_dir -v $output_dir:$output_dir $DOCKERLAYPA \
-        python run.py \
-        -c $LAYPAMODEL \
-        -i $input_dir \
-        -o $output_dir \
-        --opts MODEL.WEIGHTS "" TEST.WEIGHTS $LAYPAMODELWEIGHTS | tee -a $tmpdir/log.txt
-
-        docker run $DOCKERGPUPARAMS --rm -it -u $(id -u ${USER}):$(id -g ${USER}) -m 32000m --shm-size 10240m -v $LAYPADIR:$LAYPADIR -v $input_dir:$input_dir -v $output_dir:$output_dir $DOCKERLAYPA \
-        python run.py \
-        -c $LAYPAMODEL \
-        -i $input_dir \
-        -o $output_dir \
-        --opts MODEL.WEIGHTS "" TEST.WEIGHTS $LAYPAMODELWEIGHTS | tee -a $tmpdir/log.txt
-
-        # > /dev/null
-
-        if [[ $STOPONERROR && $? -ne 0 ]]; then
-                echo "Laypa errored has errored, stopping program"
-                exit 1
+        echo "Running Laypa baseline detection..."
+        if ! docker run $DOCKERGPUPARAMS --rm -u $(id -u ${USER}):$(id -g ${USER}) -m 32000m --shm-size 10240m \
+            -v "$LAYPADIR:$LAYPADIR" \
+            -v "$input_dir:$input_dir" \
+            -v "$output_dir:$output_dir" \
+            $DOCKERLAYPA \
+            python run.py \
+            -c "$LAYPAMODEL" \
+            -i "$input_dir" \
+            -o "$output_dir" \
+            --opts MODEL.WEIGHTS "" TEST.WEIGHTS "$LAYPAMODELWEIGHTS" 2>&1 | tee -a "$tmpdir/log.txt"; then
+            echo "Error: Laypa baseline detection failed"
+            exit 1
         fi
 
-        docker run --rm -u $(id -u ${USER}):$(id -g ${USER}) -v $output_dir:$output_dir $DOCKERLOGHITOOLING /src/loghi-tooling/minions/target/appassembler/bin/MinionExtractBaselines \
-        -input_path_png $output_dir/page/ \
-        -input_path_page $output_dir/page/ \
-        -output_path_page $output_dir/page/ \
-        -as_single_region true $USE2013NAMESPACE | tee -a $tmpdir/log.txt
-
-
-        if [[ $STOPONERROR && $? -ne 0 ]]; then
-                echo "MinionExtractBaselines (Laypa) errored has errored, stopping program"
-                exit 1
+        echo "Running MinionExtractBaselines..."
+        if ! docker run --rm -u $(id -u ${USER}):$(id -g ${USER}) \
+            -v "$output_dir:$output_dir" \
+            $DOCKERLOGHITOOLING /src/loghi-tooling/minions/target/appassembler/bin/MinionExtractBaselines \
+            -input_path_png "$output_dir/page/" \
+            -input_path_page "$output_dir/page/" \
+            -output_path_page "$output_dir/page/" \
+            -as_single_region true $USE2013NAMESPACE 2>&1 | tee -a "$tmpdir/log.txt"; then
+            echo "Error: MinionExtractBaselines failed"
+            exit 1
         fi
 fi
 
 # #HTR option 1 LoghiHTR
 if [[ $HTRLOGHI -eq 1 ]]
 then
-
         echo "starting Loghi HTR"
-        # #pylaia takes 3 channels, rutgerhtr 4channels png or 3 with new models
-       docker run -u $(id -u ${USER}):$(id -g ${USER}) --rm \
-       -v $SRC/:$SRC/ \
-       -v $tmpdir:$tmpdir \
-       $DOCKERLOGHITOOLING /src/loghi-tooling/minions/target/appassembler/bin/MinionCutFromImageBasedOnPageXMLNew \
-       -input_path $SRC \
-       -outputbase $tmpdir/imagesnippets/ \
-       -output_type png \
-       -channels 4 \
-       -threads 4 $USE2013NAMESPACE| tee -a $tmpdir/log.txt
-
-
-        if [[ $STOPONERROR && $? -ne 0 ]]; then
-                echo "MinionCutFromImageBasedOnPageXMLNew has errored, stopping program"
-                exit 1
+        
+        echo "Running MinionCutFromImageBasedOnPageXMLNew..."
+        if ! docker run -u $(id -u ${USER}):$(id -g ${USER}) --rm \
+            -v "$SRC:$SRC" \
+            -v "$tmpdir:$tmpdir" \
+            $DOCKERLOGHITOOLING /src/loghi-tooling/minions/target/appassembler/bin/MinionCutFromImageBasedOnPageXMLNew \
+            -input_path "$SRC" \
+            -outputbase "$tmpdir/imagesnippets/" \
+            -output_type png \
+            -channels 4 \
+            -threads 4 $USE2013NAMESPACE 2>&1 | tee -a "$tmpdir/log.txt"; then
+            echo "Error: MinionCutFromImageBasedOnPageXMLNew failed"
+            exit 1
         fi
 
-       find $tmpdir/imagesnippets/ -type f -name '*.png' > $tmpdir/lines.txt
+        find "$tmpdir/imagesnippets/" -type f -name '*.png' > "$tmpdir/lines.txt"
 
-	LOGHIDIR="$(dirname "${HTRLOGHIMODEL}")"
-        # CUDA_VISIBLE_DEVICES=-1 python3 ~/src/htr/src/main.py --do_inference --channels 4 --height $HTR_LOGHI_MODEL_HEIGHT --existing_model ~/src/htr/$HTR_LOGHI_MODEL  --batch_size 32 --use_mask --inference_list $tmpdir/lines.txt --results_file $tmpdir/results.txt --charlist ~/src/htr/$HTR_LOGHI_MODEL.charlist --gpu $GPU
-#        docker run $DOCKERGPUPARAMS --rm -m 32000m --shm-size 10240m -ti -v $tmpdir:$tmpdir docker.htr python3 /src/src/main.py --do_inference --channels 4 --height $HTRLOGHIMODELHEIGHT --existing_model /src/loghi-htr-models/$HTRLOGHIMODEL  --batch_size 10 --use_mask --inference_list $tmpdir/lines.txt --results_file $tmpdir/results.txt --charlist /src/loghi-htr-models/$HTRLOGHIMODEL.charlist --gpu $GPU --output $tmpdir/output/ --config_file_output $tmpdir/output/config.txt --beam_width 10
-        docker run $DOCKERGPUPARAMS -u $(id -u ${USER}):$(id -g ${USER}) --rm -m 32000m --shm-size 10240m -ti -v /tmp:/tmp -v $tmpdir:$tmpdir -v $LOGHIDIR:$LOGHIDIR $DOCKERLOGHIHTR \
-	bash -c "LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.so.4 python3 /src/loghi-htr/src/main.py \
-        --do_inference \
-        --existing_model $HTRLOGHIMODEL  \
-        --batch_size 64 \
-        --use_mask \
-        --inference_list $tmpdir/lines.txt \
-        --results_file $tmpdir/results.txt \
-        --charlist $HTRLOGHIMODEL/charlist.txt \
-        --gpu $GPU \
-        --output $tmpdir/output/ \
-        --config_file_output $tmpdir/output/config.json \
-        --beam_width $BEAMWIDTH " | tee -a $tmpdir/log.txt
-
-        if [[ $STOPONERROR && $? -ne 0 ]]; then
-                echo "Loghi-HTR has errored, stopping program"
-                exit 1
+        LOGHIDIR="$(dirname "${HTRLOGHIMODEL}")"
+        
+        echo "Running Loghi HTR..."
+        if ! docker run $DOCKERGPUPARAMS -u $(id -u ${USER}):$(id -g ${USER}) --rm -m 32000m --shm-size 10240m \
+            -v /tmp:/tmp \
+            -v "$tmpdir:$tmpdir" \
+            -v "$LOGHIDIR:$LOGHIDIR" \
+            $DOCKERLOGHIHTR \
+            bash -c "LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.so.4 python3 /src/loghi-htr/src/main.py \
+            --do_inference \
+            --existing_model $HTRLOGHIMODEL \
+            --batch_size 64 \
+            --use_mask \
+            --inference_list $tmpdir/lines.txt \
+            --results_file $tmpdir/results.txt \
+            --charlist $HTRLOGHIMODEL/charlist.txt \
+            --gpu $GPU \
+            --output $tmpdir/output/ \
+            --config_file_output $tmpdir/output/config.json \
+            --beam_width $BEAMWIDTH" 2>&1 | tee -a "$tmpdir/log.txt"; then
+            echo "Error: Loghi HTR failed"
+            exit 1
         fi
-        docker run -u $(id -u ${USER}):$(id -g ${USER}) --rm -v $LOGHIDIR:$LOGHIDIR -v $SRC/:$SRC/ -v $tmpdir:$tmpdir $DOCKERLOGHITOOLING /src/loghi-tooling/minions/target/appassembler/bin/MinionLoghiHTRMergePageXML \
-                -input_path $SRC/page \
-                -results_file $tmpdir/results.txt \
-                -config_file $HTRLOGHIMODEL/config.json -htr_code_config_file $tmpdir/output/config.json $USE2013NAMESPACE | tee -a $tmpdir/log.txt
 
-
-        if [[ $STOPONERROR && $? -ne 0 ]]; then
-                echo "MinionLoghiHTRMergePageXML has errored, stopping program"
-                exit 1
+        echo "Running MinionLoghiHTRMergePageXML..."
+        if ! docker run -u $(id -u ${USER}):$(id -g ${USER}) --rm \
+            -v "$LOGHIDIR:$LOGHIDIR" \
+            -v "$SRC:$SRC" \
+            -v "$tmpdir:$tmpdir" \
+            $DOCKERLOGHITOOLING /src/loghi-tooling/minions/target/appassembler/bin/MinionLoghiHTRMergePageXML \
+            -input_path "$SRC/page" \
+            -results_file "$tmpdir/results.txt" \
+            -config_file "$HTRLOGHIMODEL/config.json" \
+            -htr_code_config_file "$tmpdir/output/config.json" $USE2013NAMESPACE 2>&1 | tee -a "$tmpdir/log.txt"; then
+            echo "Error: MinionLoghiHTRMergePageXML failed"
+            exit 1
         fi
 fi
 
