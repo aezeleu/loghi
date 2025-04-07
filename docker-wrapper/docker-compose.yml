@@ -1,0 +1,41 @@
+version: '3.9'
+
+services:
+  loghi-wrapper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: loghi-wrapper:latest
+    container_name: loghi-wrapper
+    volumes:
+      # Mount Docker socket for Docker-in-Docker functionality
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount data directories
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+      - ./models:/app/models
+      # Option 1: Mount Git modules (uncomment if using mounted modules)
+      - ../laypa:/app/modules/laypa
+      - ../loghi-htr:/app/modules/loghi-htr
+      - ../loghi-tooling:/app/modules/loghi-tooling
+      - ../prima-core-libs:/app/modules/prima-core-libs
+    environment:
+      - TZ=Europe/Amsterdam
+      - ENABLE_CRON=false
+      - USE_GIT_SUBMODULES=false
+    restart: unless-stopped
+    # Uncomment if you need to use GPUs
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  data:
+  logs:
+  config:
+  models: 

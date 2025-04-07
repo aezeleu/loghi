@@ -1,0 +1,12 @@
+.git
+*.md
+data/
+logs/
+config/
+models/
+temp/
+.env
+docker-compose.yml
+Dockerfile
+*.log
+.dockerignore 

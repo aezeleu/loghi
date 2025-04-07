@@ -549,3 +549,48 @@ The health check is automatically run after installation. If any issues are foun
 3. **Directory Permissions**
    - Solution: Check ownership with `ls -la` and fix with `chmod` if needed
 
+## Docker Wrapper
+
+A new Docker wrapper has been added to this project, making it easier to deploy and use Loghi in a containerized environment. The wrapper encapsulates all necessary dependencies and tools, and provides Docker-in-Docker capability to run Loghi's component containers.
+
+### Docker Wrapper Features
+
+- Complete Docker environment for local deployment
+- Docker-in-Docker capability to run Loghi's component containers
+- Configurable through environment variables and mounted configuration files
+- CRON job support for automated processing
+- Two options for Git submodules: mount from host or pull directly
+- GPU support for faster processing (requires NVIDIA Docker setup)
+
+### Quick Start with Docker Wrapper
+
+1. Navigate to the docker-wrapper directory:
+   ```bash
+   cd docker-wrapper
+   ```
+
+2. Configure the environment:
+   ```bash
+   # Copy and edit the configuration file
+   mkdir -p config
+   cp config/loghi.conf.default config/loghi.conf
+   # Edit the config/loghi.conf file as needed
+   ```
+
+3. Prepare directories:
+   ```bash
+   mkdir -p data/input data/output logs models
+   ```
+
+4. Start the container:
+   ```bash
+   docker-compose up -d
+   ```
+
+5. Process images:
+   ```bash
+   # Place your images in the data/input directory
+   docker exec loghi-wrapper run-pipeline /app/data/input /app/data/output
+   ```
+
+For more details on using the Docker wrapper, see the [Docker Wrapper README](docker-wrapper/README.md).
