@@ -1,0 +1,7 @@
+# Loghi Cron Jobs
+# Format: minute hour day month weekday command
+
+# Default: Every 30 minutes, check input directory and process new files
+*/30 * * * * root . /app/config/loghi.conf && /app/pipeline_wrapper.sh $LOGHI_DATA_DIR/input $LOGHI_DATA_DIR/output >> $LOGHI_LOGS_DIR/cron.log 2>&1
+
+# Add your custom cron jobs below this line 
