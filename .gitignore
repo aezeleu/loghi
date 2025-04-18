@@ -7,3 +7,5 @@ temp_workspace/
 _my_test_artifacts/
 *.lock
 xml_conversion_errors.log
+les-15_en_16/
+logs/*.log
