@@ -549,7 +549,6 @@ The health check is automatically run after installation. If any issues are foun
 3. **Directory Permissions**
    - Solution: Check ownership with `ls -la` and fix with `chmod` if needed
 
-<<<<<<< HEAD
 ## Docker Wrapper
 
 A new Docker wrapper has been added to this project, making it easier to deploy and use Loghi in a containerized environment. The wrapper encapsulates all necessary dependencies and tools, and provides Docker-in-Docker capability to run Loghi's component containers.
@@ -596,5 +595,4 @@ A new Docker wrapper has been added to this project, making it easier to deploy 
 
 For more details on using the Docker wrapper, see the [Docker Wrapper README](docker-wrapper/README.md).
 
-=======
->>>>>>> 2a0cc71ad9ba364273e56712fb26e9a32fa0da8d
+
