@@ -1,0 +1,26 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<PcGts xmlns="http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15 http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15/pagecontent.xsd">
+  <Metadata>
+    <Creator>Loghi MinionGeneratePageImages</Creator>
+    <Created>2025-03-26T17:24:01</Created>
+    <LastChange>2025-03-26T17:24:01</LastChange>
+  </Metadata>
+  <Page imageFilename="synthetic0000000001-DejaVu_Sans_Bold.png" imageWidth="1918" imageHeight="156">
+    <ReadingOrder>
+      <OrderedGroup id="orderedgroup_c9cb89e4-c498-47be-a417-1061e181c325">
+        <RegionRefIndexed index="0" regionRef="region_4abfbe15-33c8-4478-8443-51358591272f"/>
+      </OrderedGroup>
+    </ReadingOrder>
+    <TextRegion id="region_4abfbe15-33c8-4478-8443-51358591272f" custom="readingOrder {index:0;} ">
+      <Coords points="21,51 1898,51 1899,52 1897,50"/>
+      <TextLine id="line_6b078d25-78ac-431b-94dc-5dbb81109f86" custom="readingOrder {index:1;}">
+        <Coords points="21,51 1898,51 1899,52 1897,50"/>
+        <Baseline points="21,51 1898,51"/>
+        <TextEquiv conf="1.0">
+          <PlainText>THIS IS A TEST TEXT FILE FOR GENERATING SYNTHETIC IMAGES.</PlainText>
+          <Unicode>THIS IS A TEST TEXT FILE FOR GENERATING SYNTHETIC IMAGES.</Unicode>
+        </TextEquiv>
+      </TextLine>
+    </TextRegion>
+  </Page>
+</PcGts>
