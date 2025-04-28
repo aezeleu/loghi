@@ -1,4 +1,4 @@
-version: '3.9'
+# version: '3.9'
 
 services:
   loghi-wrapper:
@@ -35,13 +35,13 @@ services:
         max-size: "10m"
         max-file: "3"
     # Uncomment if you need to use GPUs
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
 volumes:
   data:
