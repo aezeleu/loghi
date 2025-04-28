@@ -39,20 +39,18 @@ RUN mkdir -p /app/modules/laypa \
 
 WORKDIR /app
 
-# First copy everything needed from the docker-wrapper directory
-COPY config/* /app/config/
-COPY scripts/* /app/scripts/
+# Copy configuration files
+COPY docker-wrapper/config/* /app/config/
 
-# For build context that includes the parent directory
-# Copy necessary files from parent directory if they exist
+# Copy scripts from root directory
 COPY na-pipeline.sh na-pipeline-train.sh pipeline_wrapper.sh generate-images.sh \
      workspace_na_pipeline.sh xml2text.sh create_train_data.sh /app/
 
 # Make scripts executable
-RUN chmod +x /app/scripts/*.sh /app/*.sh || true
+RUN chmod +x /app/*.sh
 
 # Set up cron
-COPY config/crontab /etc/cron.d/loghi-cron
+COPY docker-wrapper/config/crontab /etc/cron.d/loghi-cron
 RUN chmod 0644 /etc/cron.d/loghi-cron \
     && touch /var/log/cron.log
 
@@ -65,10 +63,26 @@ ENV LOGHI_MODULES_DIR=/app/modules
 ENV PATH="/app:/app/scripts:${PATH}"
 
 # Create entrypoint script
-COPY scripts/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN echo '#!/bin/bash\n\
+# Start cron in the background\n\
+service cron start\n\
+\n\
+# Create input and output directories if they don'\''t exist\n\
+mkdir -p /app/data/input /app/data/output\n\
+\n\
+# Set proper permissions\n\
+chmod -R 777 /app/data /app/logs\n\
+\n\
+# Print startup message\n\
+echo "Loghi Docker wrapper started at $(date)"\n\
+echo "CRON service status: $(service cron status)"\n\
+echo "Input directory: /app/data/input"\n\
+echo "Output directory: /app/data/output"\n\
+\n\
+# Keep the container running and show logs\n\
+tail -f /var/log/cron.log /app/logs/cron.log' > /app/entrypoint.sh \
+    && chmod +x /app/entrypoint.sh
 
-VOLUME ["/app/data", "/app/logs", "/app/config", "/app/models", "/app/modules"]
+VOLUME ["/app/data", "/app/logs", "/app/config", "/app/models", "/app/modules", "/app/root"]
 
-ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["start"] 
+ENTRYPOINT ["/app/entrypoint.sh"] 

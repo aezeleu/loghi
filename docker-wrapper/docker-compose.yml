@@ -3,28 +3,37 @@ version: '3.9'
 services:
   loghi-wrapper:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..  # Points to the root directory
+      dockerfile: docker-wrapper/Dockerfile
     image: loghi-wrapper:latest
     container_name: loghi-wrapper
     volumes:
       # Mount Docker socket for Docker-in-Docker functionality
       - /var/run/docker.sock:/var/run/docker.sock
+      # Mount the entire root directory
+      - ../:/app/root
       # Mount data directories
       - ./data:/app/data
       - ./logs:/app/logs
       - ./config:/app/config
       - ./models:/app/models
-      # Option 1: Mount Git modules (uncomment if using mounted modules)
+      # Mount Git modules
       - ../laypa:/app/modules/laypa
       - ../loghi-htr:/app/modules/loghi-htr
       - ../loghi-tooling:/app/modules/loghi-tooling
       - ../prima-core-libs:/app/modules/prima-core-libs
     environment:
       - TZ=Europe/Amsterdam
-      - ENABLE_CRON=false
+      - ENABLE_CRON=true
       - USE_GIT_SUBMODULES=false
     restart: unless-stopped
+    user: root  # Run as root to ensure proper permissions
+    privileged: true  # Required for Docker-in-Docker functionality
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     # Uncomment if you need to use GPUs
     # deploy:
     #   resources:
