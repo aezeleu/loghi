@@ -1,6 +1,112 @@
 # Loghi Docker Wrapper
 
-This Docker wrapper provides a containerized environment for running the Loghi Handwritten Text Recognition (HTR) pipeline. It encapsulates all necessary dependencies and tools, making it easier to deploy and use Loghi for processing historical documents.
+This Docker wrapper provides a containerized environment for running the Loghi HTR processing pipeline.
+
+## Configuration
+
+### Environment Variables
+
+Create a `.env` file in the docker-wrapper directory (copy from `.env-example`):
+
+```bash
+cp .env-example .env
+```
+
+Edit the `.env` file to set your specific paths:
+
+```bash
+# Google Drive paths configuration
+INPUT_SOURCE_PATH=/path/to/your/input/directory
+OUTPUT_DEST_PATH=/path/to/your/output/directory
+
+# Other environment variables
+TZ=Europe/Amsterdam
+ENABLE_CRON=true
+USE_GIT_SUBMODULES=false
+```
+
+#### Required Variables
+
+- `INPUT_SOURCE_PATH`: Path to your Google Drive input directory in WSL
+- `OUTPUT_DEST_PATH`: Path to your Google Drive output directory in WSL
+
+#### Optional Variables
+
+- `TZ`: Timezone (default: Europe/Amsterdam)
+- `ENABLE_CRON`: Enable/disable CRON scheduling (default: true)
+- `USE_GIT_SUBMODULES`: Enable/disable Git submodules (default: false)
+
+### Google Drive Setup
+
+1. Mount your Google Drive in WSL
+2. Set the correct paths in your `.env` file
+3. Ensure the paths are accessible and have proper permissions
+
+Example paths for different Google Drive accounts:
+```bash
+# Account 1
+INPUT_SOURCE_PATH=/mnt/i/Shared drives/Loghi/input
+OUTPUT_DEST_PATH=/mnt/i/Shared drives/Loghi/output
+
+# Account 2
+INPUT_SOURCE_PATH=/mnt/g/Other Drive/Loghi/input
+OUTPUT_DEST_PATH=/mnt/g/Other Drive/Loghi/output
+```
+
+## Usage
+
+1. Configure your environment:
+```bash
+cd docker-wrapper
+cp .env-example .env
+# Edit .env with your paths
+```
+
+2. Build and start the container:
+```bash
+docker-compose up -d --build
+```
+
+3. Monitor the logs:
+```bash
+docker-compose logs -f
+```
+
+The container will:
+- Mount your specified Google Drive directories
+- Process files from the input directory every 5 minutes
+- Save results to the output directory
+- Log activities to the local logs directory
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Permission Issues**
+   - Ensure the mounted directories have proper permissions
+   - The container runs as root to handle permissions
+
+2. **Path Issues**
+   - Verify your Google Drive paths are correct
+   - Check that the paths are properly mounted in WSL
+   - Ensure paths in .env match your actual directory structure
+
+3. **CRON Issues**
+   - Check /app/logs/cron.log for CRON-related errors
+   - Verify the CRON service is running in the container
+
+## GPU Support
+
+The container is configured to use NVIDIA GPUs if available. To enable GPU support:
+
+1. Install NVIDIA Docker runtime
+2. The container will automatically detect and use available GPUs
+
+## Maintenance
+
+- Logs are stored in the `logs` directory
+- Configuration files are in the `config` directory
+- Models are stored in the `models` directory
 
 ## Features
 
@@ -132,13 +238,6 @@ To enable GPU support:
 1. Ensure you have NVIDIA Docker installed
 2. Uncomment the GPU section in the `docker-compose.yml` file
 3. Set `GPU=0` (or another GPU index) in your `config/loghi.conf` file
-
-## Troubleshooting
-
-- **Docker-in-Docker issues**: Ensure the Docker socket is properly mounted
-- **Permission issues**: Check permissions on mounted volumes
-- **GPU not detected**: Verify NVIDIA Docker setup and GPU configuration
-- **Processing errors**: Check logs in the `logs/` directory
 
 ## License
 

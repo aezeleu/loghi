@@ -67,20 +67,21 @@ RUN echo '#!/bin/bash\n\
 # Start cron in the background\n\
 service cron start\n\
 \n\
-# Create input and output directories if they don'\''t exist\n\
-mkdir -p /app/data/input /app/data/output\n\
+# Create necessary directories\n\
+mkdir -p /app/logs\n\
+mkdir -p /app/data/output\n\
 \n\
-# Set proper permissions\n\
-chmod -R 777 /app/data /app/logs\n\
+# Set proper permissions for writable directories\n\
+chmod -R 777 /app/logs /app/data/output\n\
 \n\
 # Print startup message\n\
 echo "Loghi Docker wrapper started at $(date)"\n\
 echo "CRON service status: $(service cron status)"\n\
-echo "Input directory: /app/data/input"\n\
-echo "Output directory: /app/data/output"\n\
+echo "Input directory: /app/data/input" > /app/logs/startup.log\n\
+echo "Output directory: /app/data/output" >> /app/logs/startup.log\n\
 \n\
 # Keep the container running and show logs\n\
-tail -f /var/log/cron.log /app/logs/cron.log' > /app/entrypoint.sh \
+tail -f /var/log/cron.log /app/logs/startup.log /app/logs/cron.log' > /app/entrypoint.sh \
     && chmod +x /app/entrypoint.sh
 
 VOLUME ["/app/data", "/app/logs", "/app/config", "/app/models", "/app/modules", "/app/root"]

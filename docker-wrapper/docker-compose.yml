@@ -10,22 +10,27 @@ services:
     volumes:
       # Mount Docker socket for Docker-in-Docker functionality
       - /var/run/docker.sock:/var/run/docker.sock
-      # Mount the entire root directory
+      # Mount root directory
       - ../:/app/root
-      # Mount data directories
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./config:/app/config
-      - ./models:/app/models
+      # Mount Google Drive directories using environment variables
+      - "${INPUT_SOURCE_PATH}:/app/data/input:ro"
+      - "${OUTPUT_DEST_PATH}:/app/data/output"
+      # Mount local directories for logs and config
+      - ./logs:/app/logs:rw
+      - ./config:/app/config:ro
+      - ./models:/app/models:rw
       # Mount Git modules
-      - ../laypa:/app/modules/laypa
-      - ../loghi-htr:/app/modules/loghi-htr
-      - ../loghi-tooling:/app/modules/loghi-tooling
-      - ../prima-core-libs:/app/modules/prima-core-libs
+      - ../laypa:/app/modules/laypa:ro
+      - ../loghi-htr:/app/modules/loghi-htr:ro
+      - ../loghi-tooling:/app/modules/loghi-tooling:ro
+      - ../prima-core-libs:/app/modules/prima-core-libs:ro
     environment:
       - TZ=Europe/Amsterdam
       - ENABLE_CRON=true
       - USE_GIT_SUBMODULES=false
+      # Default paths (can be overridden)
+      - INPUT_SOURCE_PATH=/mnt/i/Shared drives/Loghi Transcriberen/fine-tuning-testing/Test source
+      - OUTPUT_DEST_PATH=/mnt/i/Shared drives/Loghi Transcriberen/fine-tuning-testing/Test dest
     restart: unless-stopped
     user: root  # Run as root to ensure proper permissions
     privileged: true  # Required for Docker-in-Docker functionality
@@ -34,7 +39,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    # Uncomment if you need to use GPUs
     deploy:
       resources:
         reservations:
@@ -44,7 +48,6 @@ services:
               capabilities: [gpu]
 
 volumes:
-  data:
   logs:
   config:
   models: 
