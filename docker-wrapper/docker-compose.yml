@@ -1,4 +1,4 @@
-# version: '3.9'
+version: '3.9'
 
 services:
   loghi-wrapper:
@@ -11,26 +11,36 @@ services:
       # Mount Docker socket for Docker-in-Docker functionality
       - /var/run/docker.sock:/var/run/docker.sock
       # Mount root directory
-      - ../:/app/root
-      # Mount Google Drive directories using environment variables
-      - "${INPUT_SOURCE_PATH}:/app/data/input:ro"
-      - "${OUTPUT_DEST_PATH}:/app/data/output"
+      - ../:/app/root:ro
+      # Mount input and output directories from environment variables
+      - type: bind
+        source: ${INPUT_SOURCE_PATH}
+        target: /app/data/input
+        read_only: true
+      - type: bind
+        source: ${OUTPUT_DEST_PATH}
+        target: /app/data/output
       # Mount local directories for logs and config
-      - ./logs:/app/logs:rw
+      - ./logs:/app/logs
       - ./config:/app/config:ro
-      - ./models:/app/models:rw
+      - ./models:/app/models
       # Mount Git modules
       - ../laypa:/app/modules/laypa:ro
       - ../loghi-htr:/app/modules/loghi-htr:ro
       - ../loghi-tooling:/app/modules/loghi-tooling:ro
       - ../prima-core-libs:/app/modules/prima-core-libs:ro
+      # Mount temp workspace as a named volume
+      - loghi_temp_workspace:/app/temp_workspace
     environment:
-      - TZ=Europe/Amsterdam
-      - ENABLE_CRON=true
-      - USE_GIT_SUBMODULES=false
-      # Default paths (can be overridden)
-      - INPUT_SOURCE_PATH=/mnt/i/Shared drives/Loghi Transcriberen/fine-tuning-testing/Test source
-      - OUTPUT_DEST_PATH=/mnt/i/Shared drives/Loghi Transcriberen/fine-tuning-testing/Test dest
+      - TZ=${TZ:-Europe/Amsterdam}
+      - ENABLE_CRON=${ENABLE_CRON:-true}
+      - USE_GIT_SUBMODULES=${USE_GIT_SUBMODULES:-false}
+      # Set environment variables for paths
+      - LOGHI_DATA_DIR=/app/data
+      - LOGHI_CONFIG_DIR=/app/config
+      - LOGHI_LOGS_DIR=/app/logs
+      - LOGHI_MODELS_DIR=/app/models
+      - LOGHI_MODULES_DIR=/app/modules
     restart: unless-stopped
     user: root  # Run as root to ensure proper permissions
     privileged: true  # Required for Docker-in-Docker functionality
@@ -50,4 +60,6 @@ services:
 volumes:
   logs:
   config:
-  models: 
+  models:
+  loghi_temp_workspace:
+    name: loghi_temp_workspace 

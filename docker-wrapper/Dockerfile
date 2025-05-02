@@ -29,7 +29,13 @@ RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /
     && rm -rf /var/lib/apt/lists/*
 
 # Create necessary directories
-RUN mkdir -p /app /app/config /app/logs /app/data /app/temp /app/models /app/backup
+RUN mkdir -p /app \
+    /app/config \
+    /app/logs \
+    /app/temp_workspace \
+    /app/models \
+    /app/backup \
+    /app/scripts
 
 # Create volume directories for mounting
 RUN mkdir -p /app/modules/laypa \
@@ -46,13 +52,19 @@ COPY docker-wrapper/config/* /app/config/
 COPY na-pipeline.sh na-pipeline-train.sh pipeline_wrapper.sh generate-images.sh \
      workspace_na_pipeline.sh xml2text.sh create_train_data.sh /app/
 
+# Copy wrapper scripts
+COPY docker-wrapper/scripts/* /app/scripts/
+
 # Make scripts executable
-RUN chmod +x /app/*.sh
+RUN chmod +x /app/*.sh /app/scripts/*.sh
 
 # Set up cron
 COPY docker-wrapper/config/crontab /etc/cron.d/loghi-cron
 RUN chmod 0644 /etc/cron.d/loghi-cron \
     && touch /var/log/cron.log
+
+# Set proper permissions for writable directories
+RUN chmod -R 777 /app/temp_workspace /app/logs
 
 # Environment variables
 ENV LOGHI_DATA_DIR=/app/data
@@ -62,28 +74,6 @@ ENV LOGHI_MODELS_DIR=/app/models
 ENV LOGHI_MODULES_DIR=/app/modules
 ENV PATH="/app:/app/scripts:${PATH}"
 
-# Create entrypoint script
-RUN echo '#!/bin/bash\n\
-# Start cron in the background\n\
-service cron start\n\
-\n\
-# Create necessary directories\n\
-mkdir -p /app/logs\n\
-mkdir -p /app/data/output\n\
-\n\
-# Set proper permissions for writable directories\n\
-chmod -R 777 /app/logs /app/data/output\n\
-\n\
-# Print startup message\n\
-echo "Loghi Docker wrapper started at $(date)"\n\
-echo "CRON service status: $(service cron status)"\n\
-echo "Input directory: /app/data/input" > /app/logs/startup.log\n\
-echo "Output directory: /app/data/output" >> /app/logs/startup.log\n\
-\n\
-# Keep the container running and show logs\n\
-tail -f /var/log/cron.log /app/logs/startup.log /app/logs/cron.log' > /app/entrypoint.sh \
-    && chmod +x /app/entrypoint.sh
-
 VOLUME ["/app/data", "/app/logs", "/app/config", "/app/models", "/app/modules", "/app/root"]
 
-ENTRYPOINT ["/app/entrypoint.sh"] 
+ENTRYPOINT ["/app/scripts/entrypoint.sh"] 
