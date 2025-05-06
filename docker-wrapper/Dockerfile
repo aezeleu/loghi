@@ -61,7 +61,8 @@ RUN chmod +x /app/*.sh /app/scripts/*.sh
 # Set up cron
 COPY docker-wrapper/config/crontab /etc/cron.d/loghi-cron
 RUN chmod 0644 /etc/cron.d/loghi-cron \
-    && touch /var/log/cron.log
+    && touch /var/log/cron.log \
+    && chmod 666 /var/log/cron.log
 
 # Set proper permissions for writable directories
 RUN chmod -R 777 /app/temp_workspace /app/logs

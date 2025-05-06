@@ -7,19 +7,15 @@ services:
       dockerfile: docker-wrapper/Dockerfile
     image: loghi-wrapper:latest
     container_name: loghi-wrapper
+    command: start
     volumes:
       # Mount Docker socket for Docker-in-Docker functionality
       - /var/run/docker.sock:/var/run/docker.sock
       # Mount root directory
       - ../:/app/root:ro
-      # Mount input and output directories from environment variables
-      - type: bind
-        source: ${INPUT_SOURCE_PATH}
-        target: /app/data/input
-        read_only: true
-      - type: bind
-        source: ${OUTPUT_DEST_PATH}
-        target: /app/data/output
+      # Mount input and output directories
+      - ./input:/app/data/input:ro
+      - ./output:/app/data/output
       # Mount local directories for logs and config
       - ./logs:/app/logs
       - ./config:/app/config:ro
@@ -32,9 +28,9 @@ services:
       # Mount temp workspace as a named volume
       - loghi_temp_workspace:/app/temp_workspace
     environment:
-      - TZ=${TZ:-Europe/Amsterdam}
-      - ENABLE_CRON=${ENABLE_CRON:-true}
-      - USE_GIT_SUBMODULES=${USE_GIT_SUBMODULES:-false}
+      - TZ=Europe/Amsterdam
+      - ENABLE_CRON=true
+      - USE_GIT_SUBMODULES=false
       # Set environment variables for paths
       - LOGHI_DATA_DIR=/app/data
       - LOGHI_CONFIG_DIR=/app/config

@@ -43,23 +43,12 @@ fi
 # Check if we're using git submodules or mounted modules
 if [ "$USE_GIT_SUBMODULES" = "true" ]; then
     echo "Using Git submodules..."
-    # Initialize and update git submodules
     cd /app
     git init
     cp /app/config/.gitmodules.default /app/.gitmodules
     git submodule update --init --recursive
-    
-    # Set the proper paths in the configuration
-    sed -i "s|LAYPAMODEL=.*|LAYPAMODEL=/app/laypa/general/baseline/config.yaml|g" $LOGHI_CONFIG_DIR/loghi.conf
-    sed -i "s|LAYPAMODELWEIGHTS=.*|LAYPAMODELWEIGHTS=/app/laypa/general/baseline/model_best_mIoU.pth|g" $LOGHI_CONFIG_DIR/loghi.conf
-    sed -i "s|HTRLOGHIMODEL=.*|HTRLOGHIMODEL=/app/loghi-htr/generic-2023-02-15|g" $LOGHI_CONFIG_DIR/loghi.conf
 else
     echo "Using mounted modules..."
-    
-    # Update configuration to use mounted modules
-    sed -i "s|LAYPAMODEL=.*|LAYPAMODEL=$LOGHI_MODULES_DIR/laypa/general/baseline/config.yaml|g" $LOGHI_CONFIG_DIR/loghi.conf
-    sed -i "s|LAYPAMODELWEIGHTS=.*|LAYPAMODELWEIGHTS=$LOGHI_MODULES_DIR/laypa/general/baseline/model_best_mIoU.pth|g" $LOGHI_CONFIG_DIR/loghi.conf
-    sed -i "s|HTRLOGHIMODEL=.*|HTRLOGHIMODEL=$LOGHI_MODULES_DIR/loghi-htr/generic-2023-02-15|g" $LOGHI_CONFIG_DIR/loghi.conf
 fi
 
 # Update BASEDIR in configuration
@@ -71,23 +60,20 @@ sed -i "s|BASEDIR=.*|BASEDIR=/app|g" $LOGHI_CONFIG_DIR/loghi.conf
 # Update scripts with configuration values
 /app/scripts/update-scripts.sh
 
-# Start cron if enabled
-if [ "$ENABLE_CRON" = "true" ]; then
-    echo "Starting cron service..."
-    cron -f &
-    echo $! > /var/run/crond.pid
-fi
-
 # Handle different commands
 case "$1" in
     start)
+        echo "Starting cron service..."
+        # Start cron in foreground mode
+        cron -f &
+        CRON_PID=$!
+        echo $CRON_PID > /var/run/crond.pid
         echo "Loghi container started. Running in daemon mode."
-        # Keep container running
-        exec tail -f /dev/null
+        # Keep container running and wait for cron
+        wait $CRON_PID
         ;;
     run-pipeline)
         echo "Running Loghi pipeline for input directory: $2"
-        # Ensure input directory exists and is accessible
         if [ ! -d "$2" ]; then
             echo "Error: Input directory $2 does not exist"
             exit 1
@@ -96,14 +82,11 @@ case "$1" in
         ;;
     run-batch)
         echo "Running Loghi batch processing for workspace: $2"
-        # Ensure input directory exists and is accessible
         if [ ! -d "$2" ]; then
             echo "Error: Input directory $2 does not exist"
             exit 1
         fi
-        # Create temporary workspace
-        mkdir -p /app/temp_workspace
-        /app/workspace_na_pipeline.sh "$2" "$3"
+        /app/workspace_na_pipeline.sh "$2"
         ;;
     generate-images)
         echo "Generating synthetic images"
@@ -128,6 +111,7 @@ case "$1" in
         echo "  help                    - Show this help message"
         ;;
     *)
-        exec "$@"
+        echo "Usage: $0 {start|run-pipeline|run-batch}"
+        exit 1
         ;;
 esac 
