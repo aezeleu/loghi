@@ -24,13 +24,15 @@ WSL_WORK_DIR="/tmp/workspace_na_pipeline"
 # Configuration options
 REMOVE_PROCESSED_DIRS=true  # Set to false to keep processed directories in the input location
 MAX_OPERATION_TIMEOUT=1800  # 30 minutes timeout for individual operations
-CHECK_INTERVAL=30          # Check every 30 seconds
+CHECK_INTERVAL=30           # Check every 30 seconds
 
 # Ensure all needed directories exist
 mkdir -p "${WSL_WORK_DIR}"
 mkdir -p "${LOG_DIR}"
 
 # Ensure tmp directory has proper permissions
+# This is generally handled by the Dockerfile and docker-compose.yml startup,
+# but being explicit here for /tmp itself doesn't hurt.
 chmod -R 777 /tmp
 
 # Function to run command with timeout
@@ -71,9 +73,10 @@ run_with_timeout() {
         fi
         
         # Check if process is using CPU
-        local cpu_usage=$(ps -p "$cmd_pid" -o %cpu | tail -n 1)
-        if [ "$cpu_usage" = "0.0" ]; then
-            echo "Warning: Operation '$operation' is not using CPU" >> "$ERROR_LOG"
+        local cpu_usage_raw=$(ps -p "$cmd_pid" -o %cpu --no-headers)
+        local cpu_usage=$(echo "$cpu_usage_raw" | tr -d ' ') # Remove spaces
+        if [[ "$cpu_usage" == "0.0" || "$cpu_usage" == "0" ]]; then
+            echo "Warning: Operation '$operation' (PID $cmd_pid) is not using CPU (usage: $cpu_usage)" >> "$ERROR_LOG"
         fi
         
         sleep $CHECK_INTERVAL
@@ -91,27 +94,37 @@ LOCK_TIMEOUT=300  # 5 minutes timeout for stale locks
 # Function to check if lock file is stale
 check_lock() {
     if [ -f "$LOCK_FILE" ]; then
-        local lock_pid=$(cat "$LOCK_FILE")
+        local lock_pid
+        lock_pid=$(cat "$LOCK_FILE")
+        # Check if lock_pid is a number and not empty
+        if ! [[ "$lock_pid" =~ ^[0-9]+$ ]]; then
+            echo "Found invalid content in lock file, removing..."
+            rm -f "$LOCK_FILE"
+            return 1 # Lock was invalid and removed
+        fi
+
         if ! kill -0 "$lock_pid" 2>/dev/null; then
-            echo "Found stale lock file, removing..."
+            echo "Found stale lock file (PID $lock_pid not running), removing..."
             rm -f "$LOCK_FILE"
-            return 1
+            return 1 # Lock was stale and removed
         fi
-        local lock_time=$(stat -c %Y "$LOCK_FILE")
-        local current_time=$(date +%s)
+        local lock_time
+        lock_time=$(stat -c %Y "$LOCK_FILE")
+        local current_time
+        current_time=$(date +%s)
         if [ $((current_time - lock_time)) -gt $LOCK_TIMEOUT ]; then
-            echo "Lock file is older than $LOCK_TIMEOUT seconds, removing..."
+            echo "Lock file is older than $LOCK_TIMEOUT seconds (PID $lock_pid still running but lock is old), removing..."
             rm -f "$LOCK_FILE"
-            return 1
+            return 1 # Lock was old and removed
         fi
-        return 0
+        return 0 # Lock is active and valid
     fi
-    return 1
+    return 1 # Lock file does not exist
 }
 
 # Check if script is already running
 if check_lock; then
-    echo "Error: Another instance of the script is already running."
+    echo "Error: Another instance of the script is already running (PID $(cat "$LOCK_FILE"))."
     echo "Lock file exists at: $LOCK_FILE"
     exit 1
 fi
@@ -122,17 +135,37 @@ echo $$ > "$LOCK_FILE"
 # Function to cleanup lock file
 cleanup_lock() {
     echo "Cleaning up lock file..."
-    rm -f "$LOCK_FILE"
-    echo "Lock file cleaned up"
+    if [ -f "$LOCK_FILE" ]; then
+        local lock_pid_content
+        lock_pid_content=$(cat "$LOCK_FILE")
+        if [ "$lock_pid_content" -eq "$$" ]; then
+            rm -f "$LOCK_FILE"
+            echo "Lock file cleaned up."
+        else
+            echo "Lock file was for a different PID ($lock_pid_content), not removing."
+        fi
+    else
+        echo "Lock file already removed."
+    fi
 }
 
-# Ensure lock file is removed when script exits
-trap 'cleanup_lock; cleanup_temp_workspace; exit' INT TERM EXIT
+# Function to cleanup temp workspace
+cleanup_temp_workspace() {
+    echo "Cleaning up temporary workspace..."
+    if [ -d "$WSL_WORK_DIR" ]; then
+        # Adding a check to ensure we are not deleting something critical by mistake
+        if [[ "$WSL_WORK_DIR" == "/tmp/workspace_na_pipeline" ]]; then
+            rm -rf "$WSL_WORK_DIR"
+            echo "Temporary workspace '$WSL_WORK_DIR' cleaned up."
+        else
+            echo "Error: WSL_WORK_DIR is not the expected path ('$WSL_WORK_DIR'), aborting cleanup for safety." >> "$ERROR_LOG"
+        fi
+    else
+        echo "Temporary workspace '$WSL_WORK_DIR' not found."
+    fi
+}
 
-# # Add a 5 minute delay (for quick testing)
-# echo "Waiting for 5 minutes..."
-# sleep 300
-# exit 0
+trap 'cleanup_temp_workspace; cleanup_lock; echo "Script exiting."; exit' INT TERM EXIT
 
 # Accept parameters from command line
 INPUT_DIR="$1"
@@ -148,94 +181,96 @@ fi
 # Check if input directory exists and is accessible
 if [ ! -d "$INPUT_DIR" ]; then
     echo "Error: Input directory '$INPUT_DIR' does not exist or is not accessible."
-    echo "Please ensure the Google Drive is properly mounted in WSL."
+    echo "Please ensure the Google Drive is properly mounted in WSL (if applicable)."
     exit 1
 fi
 
 # Check if output directory path is writable
 if ! mkdir -p "$OUTPUT_DIR" 2>/dev/null; then
     echo "Error: Cannot create or access output directory '$OUTPUT_DIR'."
-    echo "Please ensure the Google Drive is properly mounted in WSL."
+    echo "Please ensure the Google Drive is properly mounted in WSL (if applicable)."
     exit 1
 fi
 
-# Create OUTPUT_DIR if it does not exist
 mkdir -p "$OUTPUT_DIR"
-
-# Ensure temporary workspace exists
 mkdir -p "${WSL_WORK_DIR}"
 
-# Define the full path to required scripts
 NA_PIPELINE="${SCRIPT_DIR}/na-pipeline.sh"
 XML2TEXT="${SCRIPT_DIR}/xml2text.sh"
 
-# Verify scripts exist and are executable
-for script in "$NA_PIPELINE" "$XML2TEXT"; do
-    if [ ! -x "$script" ]; then
-        echo "Error: Required script not found or not executable: $script"
+for script_path in "$NA_PIPELINE" "$XML2TEXT"; do
+    if [ ! -f "$script_path" ]; then
+        echo "Error: Required script not found: $script_path"
+        exit 1
+    fi
+    if [ ! -x "$script_path" ]; then
+        echo "Error: Required script not executable: $script_path"
         exit 1
     fi
 done
 
-# Function to check if a file needs processing
-# Returns 0 if file needs processing, 1 if it doesn't
 needs_processing() {
     local source_file="$1"
-    local output_dir="$2"
-    local filename=$(basename "$source_file")
-    local extension="${filename##*.}"
-    local name_without_ext="${filename%.*}"
+    local target_output_dir="$2"
+    local filename
+    filename=$(basename "$source_file")
+    local extension
+    extension="${filename##*.}"
+    local name_without_ext
+    name_without_ext="${filename%.*}"
     
-    # Get source file modification time in seconds since epoch
-    local source_mtime=$(stat -c %Y "$source_file")
+    local source_mtime
+    source_mtime=$(stat -c %Y "$source_file")
     
-    # Format current date for new files
-    local current_date=$(date +"%d%m%Y")
-    
-    # Check if a file with the same base name exists in the output directory
-    for dest_file in "$output_dir"/${name_without_ext}_*.$extension; do
-        if [ -f "$dest_file" ]; then
-            # Extract date from filename
-            local dest_date=$(basename "$dest_file" | sed -E "s/${name_without_ext}_([0-9]{8})\.${extension}/\1/")
-            
-            # Get destination file modification time
-            local dest_mtime=$(stat -c %Y "$dest_file")
-            
-            # If source file is newer than destination file, it needs processing
-            if [ "$source_mtime" -gt "$dest_mtime" ]; then
-                echo "Source file is newer than destination file. Processing required."
-                return 0
-            else
-                echo "File already processed and up to date: $dest_file"
-                return 1
+    local existing_processed_files
+    existing_processed_files=$(find "$target_output_dir" -maxdepth 1 -name "${name_without_ext}_*.$extension" -print -quit)
+
+    if [ -n "$existing_processed_files" ]; then
+        local newest_dest_mtime=0
+        local dest_file
+        for dest_file in "$target_output_dir"/${name_without_ext}_*.$extension; do
+            if [ -f "$dest_file" ]; then
+                local current_dest_mtime
+                current_dest_mtime=$(stat -c %Y "$dest_file")
+                if [ "$current_dest_mtime" -gt "$newest_dest_mtime" ]; then
+                    newest_dest_mtime=$current_dest_mtime
+                fi
             fi
+        done
+
+        if [ "$source_mtime" -gt "$newest_dest_mtime" ]; then
+            echo "Source file '$filename' is newer than the newest processed version. Processing required."
+            return 0
+        else
+            echo "File '$filename' already processed and source is not newer: $(basename "$existing_processed_files")"
+            return 1
         fi
-    done
+    fi
     
-    # If no matching file found in destination, it needs processing
-    echo "No matching file found in destination. Processing required."
+    echo "No processed version of '$filename' found in destination. Processing required."
     return 0
 }
 
-# Function to copy file with date suffix
 copy_with_date_suffix() {
     local source_file="$1"
     local dest_dir="$2"
-    local filename=$(basename "$source_file")
-    local extension="${filename##*.}"
-    local name_without_ext="${filename%.*}"
-    local current_date=$(date +"%d%m%Y")
+    local filename
+    filename=$(basename "$source_file")
+    local extension
+    extension="${filename##*.}"
+    local name_without_ext
+    name_without_ext="${filename%.*}"
+    local current_date
+    current_date=$(date +"%d%m%Y")
     
-    # Create the new filename with date suffix
-    local new_filename="${name_without_ext}_${current_date}.${extension}"
+    local new_filename
+    new_filename="${name_without_ext}_${current_date}.${extension}"
     
-    # Create destination directory if it doesn't exist
     mkdir -p "${dest_dir}"
     
-    # Copy the file with proper path handling
     echo "Copying from ${source_file} to ${dest_dir}/${new_filename}"
-    if ! cp "${source_file}" "${dest_dir}/${new_filename}"; then
-        echo "Error: Failed to copy ${source_file} to ${dest_dir}/${new_filename}"
+    if ! cp -p "${source_file}" "${dest_dir}/${new_filename}"; then
+        echo "Error: Failed to copy ${source_file} to ${dest_dir}/${new_filename}" >> "$ERROR_LOG"
         return 1
     fi
     
@@ -243,159 +278,141 @@ copy_with_date_suffix() {
     return 0
 }
 
-# Function to cleanup temp workspace
-cleanup_temp_workspace() {
-    echo "Cleaning up temporary workspace..."
-    if [ -d "$WSL_WORK_DIR" ]; then
-        rm -rf "$WSL_WORK_DIR"
-        echo "Temporary workspace cleaned up"
-    fi
-}
+echo 'Tree of the workspace directory (INPUT_DIR):'
+tree "$INPUT_DIR" || echo "tree command not found or failed on $INPUT_DIR"
 
-# Ensure cleanup happens on script exit
-trap 'cleanup_temp_workspace' EXIT
+echo 'Tree of the destination directory (OUTPUT_DIR):'
+tree "$OUTPUT_DIR" || echo "tree command not found or failed on $OUTPUT_DIR"
 
-echo 'Tree of the workspace directory:'
-tree $WORKSPACE_PATH
-
-echo 'Tree of the destination directory:'
-tree $DESTINATION_PATH
-
-# Process each directory in the input
-for dir in "${INPUT_DIR}"/*/ ; do
-    if [ ! -d "${dir}" ]; then
+for dir_path in "${INPUT_DIR}"/*/ ; do
+    if [ ! -d "${dir_path}" ]; then
+        echo "Skipping non-directory item: ${dir_path}"
         continue
     fi
     
-    dir_name=$(basename "${dir}")
-    echo "Processing directory: ${dir_name}"
+    dir_name=$(basename "${dir_path}")
+    echo "--- Processing directory: ${dir_name} ---"
     
-    # Create workspace directory
     workspace_dir="${WSL_WORK_DIR}/${dir_name}"
     mkdir -p "${workspace_dir}"
     
-    # Copy files to workspace with explicit patterns for image files
-    echo "Copying image files from ${dir} to ${workspace_dir}"
-    find "${dir}" -type f \( -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" -o -name "*.tif" -o -name "*.tiff" \) -exec cp {} "${workspace_dir}/" \;
+    echo "Setting 777 permissions recursively for temporary workspace: ${workspace_dir}"
+    chmod -R 777 "${workspace_dir}"
     
-    # Ensure page directory exists
+    echo "Copying image files from ${dir_path} to ${workspace_dir}"
+    find "${dir_path}" -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.tif" -o -iname "*.tiff" \) -exec cp -t "${workspace_dir}/" {} +
+    
     mkdir -p "${workspace_dir}/page"
     
-    # Create a sanitized directory name (replace spaces with underscores)
     safe_subdir_name=$(echo "$dir_name" | tr ' ' '_')
     
-    # Create output directory for this subdirectory
-    output_subdir="${OUTPUT_DIR}/${safe_subdir_name}"
-    mkdir -p "${output_subdir}"
+    final_output_subdir="${OUTPUT_DIR}/${safe_subdir_name}"
+    mkdir -p "${final_output_subdir}"
     
-    # Check if files need processing
-    process_directory=false
-    for file in "${dir}"/*; do
-        if [ -f "$file" ]; then
-            if needs_processing "$file" "${output_subdir}"; then
-                process_directory=true
-                break
+    process_this_directory=false
+    for file_in_source in "${dir_path}"/*; do
+        if [ -f "$file_in_source" ]; then
+            if needs_processing "$file_in_source" "${final_output_subdir}"; then
+                process_this_directory=true
+                break 
             fi
         fi
     done
     
-    if [ "$process_directory" = true ]; then
-        # Execute na-pipeline.sh on the copied directory with proper escaping
-        echo "Executing na-pipeline.sh on: ${workspace_dir}"
-        if ! run_with_timeout "${NA_PIPELINE} ${workspace_dir} ${workspace_dir}/output" "$MAX_OPERATION_TIMEOUT" "na-pipeline.sh"; then
-            echo "Error: na-pipeline.sh failed for directory ${safe_subdir_name}"
-            echo "$(date): Error in na-pipeline.sh for directory ${safe_subdir_name}" >> "$ERROR_LOG"
-            continue
+    if [ "$process_this_directory" = true ]; then
+        echo "Directory '${dir_name}' requires processing."
+        
+        # These are NOT local variables as they are in the main script body loop
+        na_pipeline_output_dir="${workspace_dir}/output" 
+        mkdir -p "${na_pipeline_output_dir}" 
+
+        echo "Executing na-pipeline.sh. Input: ${workspace_dir}, Output: ${na_pipeline_output_dir}"
+        if ! run_with_timeout "${NA_PIPELINE} ${workspace_dir} ${na_pipeline_output_dir}" "$MAX_OPERATION_TIMEOUT" "na-pipeline.sh for ${dir_name}"; then
+            echo "Error: na-pipeline.sh failed for directory ${dir_name}" >> "$ERROR_LOG"
+            continue 
         fi
 
-        # Check if page directory exists before attempting XML conversion
-        if [ -d "${workspace_dir}/page" ]; then
-            echo "Converting XML files to text using xml2text.sh..."
-            if ! run_with_timeout "${XML2TEXT} ${workspace_dir}/page ${workspace_dir}/output" 900 "xml2text.sh"; then
-                echo "Error: xml2text.sh failed for directory ${safe_subdir_name}"
-                echo "$(date): Error in xml2text.sh for directory ${safe_subdir_name}" >> "$ERROR_LOG"
+        page_xml_dir="${workspace_dir}/page" 
+        if [ -d "${page_xml_dir}" ] && [ "$(ls -A "${page_xml_dir}")" ]; then
+            echo "Converting XML files to text using xml2text.sh from ${page_xml_dir}"
+            if ! run_with_timeout "${XML2TEXT} ${page_xml_dir} ${na_pipeline_output_dir}" 900 "xml2text.sh for ${dir_name}"; then
+                echo "Error: xml2text.sh failed for directory ${dir_name}" >> "$ERROR_LOG"
             else
-                echo "XML to text conversion completed successfully"
+                echo "XML to text conversion completed successfully for ${dir_name}"
             fi
         else
-            echo "Note: No 'page' directory found in ${workspace_dir} - skipping XML conversion"
+            echo "Note: No 'page' directory with XML files found in ${page_xml_dir} after na-pipeline.sh - skipping XML conversion for ${dir_name}"
         fi
 
-        # Copy output files to final destination with date suffix
-        if [ -d "${workspace_dir}/output" ]; then
-            # Copy each file with date suffix
-            for file in "${workspace_dir}/output/"*; do
-                if [ -f "$file" ]; then
-                    copy_with_date_suffix "$file" "${output_subdir}"
+        if [ -d "${na_pipeline_output_dir}" ] && [ "$(ls -A "${na_pipeline_output_dir}")" ]; then
+            echo "Copying processed files from ${na_pipeline_output_dir} to ${final_output_subdir}"
+            for file_to_copy in "${na_pipeline_output_dir}/"*; do
+                if [ -f "$file_to_copy" ]; then
+                    copy_with_date_suffix "$file_to_copy" "${final_output_subdir}"
                 fi
             done
-            
-            echo "Copied output to ${output_subdir} with date suffix"
+            echo "Copied output to ${final_output_subdir} with date suffix for ${dir_name}"
         else
-            echo "Warning: Output directory not found in ${workspace_dir}"
+            echo "Warning: Output directory ${na_pipeline_output_dir} not found or empty after processing ${dir_name}" >> "$ERROR_LOG"
         fi
 
-        # Only remove processed directory if processing was successful and REMOVE_PROCESSED_DIRS is true
         if [ "$REMOVE_PROCESSED_DIRS" = true ]; then
-            echo "Checking for successful processing in ${output_subdir}"
+            echo "Checking for successful processing in ${final_output_subdir} to consider removing source ${dir_path}"
+            current_date_suffix=$(date +"%d%m%Y")
+            processed_files_count=$(find "${final_output_subdir}" -maxdepth 1 -type f -name "*_${current_date_suffix}.*" | wc -l)
             
-            # Check if any files in the output directory have been processed today
-            current_date=$(date +"%d%m%Y")
-            processed_files=$(find "${output_subdir}" -type f -name "*_${current_date}.*" | wc -l)
-            
-            if [ "$processed_files" -gt 0 ]; then
-                echo "Found ${processed_files} processed files from today. Attempting to remove source directory..."
-                source_dir="${INPUT_DIR}/${dir_name}"
+            if [ "$processed_files_count" -gt 0 ]; then
+                echo "Found ${processed_files_count} processed files from today in ${final_output_subdir}. Attempting to remove source directory: ${dir_path}"
                 
-                # Verify source directory exists and is not empty
-                if [ ! -d "${source_dir}" ]; then
-                    echo "Warning: Source directory does not exist: ${source_dir}"
+                if [ ! -d "${dir_path}" ]; then
+                    echo "Warning: Source directory to remove does not exist: ${dir_path}" >> "$ERROR_LOG"
+                elif [ ! "$(ls -A "${dir_path}")" ]; then
+                     echo "Source directory ${dir_path} is already empty. Removing..."
+                     rm -rf "${dir_path}" && echo "Successfully removed empty source directory: ${dir_path}" || echo "Failed to remove empty source directory ${dir_path}" >> "$ERROR_LOG"
                 else
-                    # Check if source directory still contains files
-                    if [ "$(ls -A "${source_dir}")" ]; then
-                        echo "Source directory exists and contains files, proceeding with removal..."
-                        echo "Attempting to remove: ${source_dir}"
-                        
-                        # Try direct removal first
-                        if rm -rf "${source_dir}"; then
-                            echo "Successfully removed directory using direct rm command"
-                        else
-                            echo "Direct removal failed, trying with Windows path..."
-                            # Try with Windows path format
-                            windows_path=$(echo "${source_dir}" | sed 's/\/mnt\//\/mnt\/i\//')
-                            if rm -rf "${windows_path}"; then
-                                echo "Successfully removed directory using Windows path"
-                            else
-                                echo "Warning: Failed to remove directory using both methods"
-                                echo "Source directory: ${source_dir}"
-                                echo "Windows path: ${windows_path}"
-                            fi
-                        fi
-                        
-                        # Verify removal
-                        if [ -d "${source_dir}" ]; then
-                            echo "Warning: Directory still exists after removal attempt: ${source_dir}"
-                            echo "Directory contents:"
-                            ls -la "${source_dir}"
-                        else
-                            echo "Verified: Directory successfully removed: ${source_dir}"
-                        fi
+                    echo "Attempting to remove non-empty source: ${dir_path}"
+                    if rm -rf "${dir_path}"; then
+                        echo "Successfully removed source directory: ${dir_path}"
                     else
-                        echo "Source directory is empty, no need to remove"
+                        echo "Direct removal of '${dir_path}' failed, trying with potential Windows path adjustment for WSL..." >> "$ERROR_LOG"
+                        windows_path_original_logic=$(echo "${dir_path}" | sed 's/\/mnt\//\/mnt\/i\//')
+                        
+                        echo "Attempting removal with adjusted path (original logic): ${windows_path_original_logic}"
+                        if rm -rf "${windows_path_original_logic}"; then
+                            echo "Successfully removed directory using adjusted path (original logic): ${windows_path_original_logic}"
+                        else
+                            echo "Warning: Failed to remove directory ${dir_path} using both methods." >> "$ERROR_LOG"
+                            echo "Source directory: ${dir_path}" >> "$ERROR_LOG"
+                            echo "Adjusted path (original logic): ${windows_path_original_logic}" >> "$ERROR_LOG"
+                        fi
                     fi
                 fi
+                
+                if [ -d "${dir_path}" ]; then
+                    echo "Warning: Directory still exists after removal attempt: ${dir_path}" >> "$ERROR_LOG"
+                    echo "Directory contents:" >> "$ERROR_LOG"
+                    ls -la "${dir_path}" >> "$ERROR_LOG"
+                else
+                    echo "Verified: Directory successfully removed or was already gone: ${dir_path}"
+                fi
             else
-                echo "Skipping directory removal: No files processed today found in ${output_subdir}"
+                echo "Skipping source directory removal for ${dir_path}: No files with today's date suffix found in ${final_output_subdir}"
             fi
         else
-            echo "Directory removal is disabled (REMOVE_PROCESSED_DIRS=false)"
+            echo "Directory removal is disabled (REMOVE_PROCESSED_DIRS=false) for ${dir_path}"
         fi
     else
-        echo "Skipping directory ${dir_name} as all files are already processed and up to date"
+        echo "Skipping directory ${dir_name} as all files are already processed and up to date."
     fi
+    
+    echo "Cleaning up item-specific temporary workspace: ${workspace_dir}"
+    if [[ "$workspace_dir" == "${WSL_WORK_DIR}/${dir_name}" ]] && [ -n "${dir_name}" ]; then
+        rm -rf "${workspace_dir}"
+        echo "Cleaned up ${workspace_dir}"
+    else
+        echo "Error: Item-specific workspace path looks unsafe or dir_name is empty ('${workspace_dir}'), not removing." >> "$ERROR_LOG"
+    fi
+    echo "--- Finished processing directory: ${dir_name} ---"
 done
-
-# Clean up temp workspace at the end
-cleanup_temp_workspace
 
 echo "Processing completed."
