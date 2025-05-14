@@ -246,6 +246,12 @@ cleanup_temp_workspace() {
 # Ensure cleanup happens on script exit
 trap 'cleanup_temp_workspace' EXIT
 
+echo 'Tree of the workspace directory:'
+tree $WORKSPACE_PATH
+
+echo 'Tree of the destination directory:'
+tree $DESTINATION_PATH
+
 # Process each directory in the input
 for dir in "${INPUT_DIR}"/*/ ; do
     if [ ! -d "${dir}" ]; then
@@ -378,6 +384,9 @@ for dir in "${INPUT_DIR}"/*/ ; do
     else
         echo "Skipping directory ${dir_name} as all files are already processed and up to date"
     fi
+
+    # Create page directory if it doesn't exist
+    mkdir -p "${workspace_dir}/page"
 done
 
 # Clean up temp workspace at the end

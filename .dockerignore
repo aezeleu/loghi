@@ -1,0 +1,15 @@
+.git
+*.md
+docker-wrapper
+_docker-wrapper
+test*
+docker
+logs
+
+# Git modules
+laypa
+loghi-htr
+loghi-tooling
+prima-core-libs
+
+
