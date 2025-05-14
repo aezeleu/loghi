@@ -8,20 +8,9 @@ services:
     image: loghi-wrapper:latest
     container_name: loghi-wrapper
     volumes:
-      # # Mount Docker socket for Docker-in-Docker functionality
-      # - /var/run/docker.sock:/var/run/docker.sock
-      # # Option 1: Mount Git modules (uncomment if using mounted modules)
-      # - ../laypa:/app/modules/laypa
-      # - ../loghi-htr:/app/modules/loghi-htr
-      # - ../loghi-tooling:/app/modules/loghi-tooling
-      # - ../prima-core-libs:/app/modules/prima-core-libs
-      # # Mount Workspace directory
-      # - "/mnt/i/Shared drives/Loghi Transcriberen/fine-tuning-testing/Test source:/workspace"
-      
       # Mount Docker socket for Docker-in-Docker functionality
-      # - ${DOCKER_SOCKET}:${DOCKER_SOCKET}
       - /var/run/docker.sock:/var/run/docker.sock
-      # Option 1: Mount Git modules (uncomment if using mounted modules)
+      # Mount Git modules
       - ${LAYPA_MODULE}:/app/laypa
       - ${LOGHI_HTR_MODULE}:/app/loghi-htr
       - ${LOGHI_TOOLING_MODULE}:/app/loghi-tooling
@@ -29,8 +18,10 @@ services:
       # Mount Workspace directory
       - ${WORKSPACE_PATH}:/workspace
       - ${DESTINATION_PATH}:/destination
-      # Add a volume for /tmp to ensure permissions
+      # Add volumes for temp directories
       - loghi_temp:/tmp
+      - loghi_logs:/app/logs
+      - loghi_workspace:/app/temp_workspace
     environment:
       - TZ=${TZ:-Europe/Amsterdam}
       - ENABLE_CRON=${ENABLE_CRON:-false}
@@ -38,9 +29,19 @@ services:
       - WORKSPACE_PATH=/workspace
       - DESTINATION_PATH=/destination
       - LANG=en_US.UTF-8
+      - LANGUAGE=en_US:en
       - LC_ALL=en_US.UTF-8
-    # Update command to fix permissions on startup
-    command: sh -c "chmod 777 /tmp && chmod 666 /var/run/docker.sock && tail -f /dev/null"
+      - MPLCONFIGDIR=/tmp/matplotlib
+    # Run as root to set permissions, then execute commands as ubuntu
+    command: sh -c "
+      mkdir -p /tmp/matplotlib && chmod 777 /tmp/matplotlib &&
+      chmod 777 /tmp && 
+      chmod 777 /app/temp_workspace &&
+      chmod 777 /app/logs &&
+      chmod 666 /var/run/docker.sock &&
+      chown -R ubuntu:ubuntu /app /workspace /tmp /app/logs /app/temp_workspace &&
+      su ubuntu -c 'tail -f /dev/null'"
+    # Don't set the user here, as we need root for initial setup
     # Uncomment if you need to use GPUs
     # deploy:
     #   resources:
@@ -52,4 +53,6 @@ services:
 
 volumes:
   loghi_temp:
+  loghi_logs:
+  loghi_workspace:
     

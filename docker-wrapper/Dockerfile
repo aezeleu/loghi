@@ -3,7 +3,7 @@ FROM ubuntu:24.04
 LABEL maintainer="Loghi Team"
 LABEL description="Docker wrapper for Loghi HTR processing pipeline"
 
-# Install dependencies including locales
+# Install dependencies including locales properly
 RUN apt-get update && apt-get install -y \
     apt-transport-https \
     ca-certificates \
@@ -22,9 +22,11 @@ RUN apt-get update && apt-get install -y \
     locales \
     && rm -rf /var/lib/apt/lists/*
 
-# Set up locale
-RUN locale-gen en_US.UTF-8
+# Set up locale properly
+RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && \
+    locale-gen
 ENV LANG en_US.UTF-8
+ENV LANGUAGE en_US:en
 ENV LC_ALL en_US.UTF-8
 
 # Install Docker
@@ -36,20 +38,16 @@ RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /
     && apt-get install -y docker-ce docker-ce-cli containerd.io \
     && rm -rf /var/lib/apt/lists/*
 
-# Create necessary directories with proper permissions
-RUN mkdir -p /app /workspace /tmp/processing
-RUN chmod 777 /tmp /tmp/processing
+# Create necessary directories
+RUN mkdir -p /app /workspace /tmp/processing /app/logs /app/temp_workspace
 
 WORKDIR /app
 
 COPY . .
 
-# Configure ubuntu user and docker group (separated into discrete steps)
-# Set ubuntu user password (should work whether user already exists or not)
-RUN echo "ubuntu:ubuntu" | chpasswd || true
-
-# Add ubuntu user to sudo group
-RUN usermod -aG sudo ubuntu || true
+# Configure ubuntu user and docker group
+RUN useradd -m -s /bin/bash -G sudo ubuntu || true
+RUN echo "ubuntu:ubuntu" | chpasswd
 
 # Create docker group if it doesn't exist
 RUN groupadd -f docker
@@ -61,18 +59,14 @@ RUN usermod -aG docker ubuntu
 RUN mkdir -p /etc/docker && \
     echo '{"group": "docker"}' > /etc/docker/daemon.json
 
-# Set ownership for app and workspace directories
-RUN chown -R ubuntu:ubuntu /app /workspace
+# Set ownership for directories
+RUN chown -R ubuntu:ubuntu /app /workspace /tmp /app/logs /app/temp_workspace
 
 # Give ubuntu user password-less sudo access
 RUN echo "ubuntu ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/ubuntu
 
-# Create startup script to ensure docker.sock permissions are correct
-RUN echo '#!/bin/bash\nchmod 666 /var/run/docker.sock\nchmod -R 777 /tmp\necho "Docker socket and temp directory permissions fixed"\nexec "$@"' > /usr/local/bin/docker-entrypoint.sh && \
-    chmod +x /usr/local/bin/docker-entrypoint.sh
-
-# Set our custom entrypoint that fixes permissions
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+# Set proper permissions for directories
+RUN chmod -R 777 /tmp /app/temp_workspace /app/logs
 
 # Default command to keep container running
 CMD ["tail", "-f", "/dev/null"]

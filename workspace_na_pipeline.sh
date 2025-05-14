@@ -18,10 +18,20 @@ TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
 LOG_FILE="${LOG_DIR}/pipeline_${TIMESTAMP}.log"
 ERROR_LOG="${LOG_DIR}/pipeline_errors_${TIMESTAMP}.log"
 
+# Create temporary workspace - define this BEFORE it's used in mkdir commands
+WSL_WORK_DIR="/tmp/workspace_na_pipeline"
+
 # Configuration options
 REMOVE_PROCESSED_DIRS=true  # Set to false to keep processed directories in the input location
 MAX_OPERATION_TIMEOUT=1800  # 30 minutes timeout for individual operations
 CHECK_INTERVAL=30          # Check every 30 seconds
+
+# Ensure all needed directories exist
+mkdir -p "${WSL_WORK_DIR}"
+mkdir -p "${LOG_DIR}"
+
+# Ensure tmp directory has proper permissions
+chmod -R 777 /tmp
 
 # Function to run command with timeout
 run_with_timeout() {
@@ -152,8 +162,7 @@ fi
 # Create OUTPUT_DIR if it does not exist
 mkdir -p "$OUTPUT_DIR"
 
-# Create temporary workspace
-WSL_WORK_DIR="${SCRIPT_DIR}/temp_workspace"
+# Ensure temporary workspace exists
 mkdir -p "${WSL_WORK_DIR}"
 
 # Define the full path to required scripts
@@ -265,12 +274,12 @@ for dir in "${INPUT_DIR}"/*/ ; do
     workspace_dir="${WSL_WORK_DIR}/${dir_name}"
     mkdir -p "${workspace_dir}"
     
-    # Copy files to workspace
-    echo "Copying files from ${dir} to ${workspace_dir}"
-    if ! cp -r "${dir}"* "${workspace_dir}/"; then
-        echo "Error: Failed to copy directory ${dir} to workspace"
-        continue
-    fi
+    # Copy files to workspace with explicit patterns for image files
+    echo "Copying image files from ${dir} to ${workspace_dir}"
+    find "${dir}" -type f \( -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" -o -name "*.tif" -o -name "*.tiff" \) -exec cp {} "${workspace_dir}/" \;
+    
+    # Ensure page directory exists
+    mkdir -p "${workspace_dir}/page"
     
     # Create a sanitized directory name (replace spaces with underscores)
     safe_subdir_name=$(echo "$dir_name" | tr ' ' '_')
@@ -384,9 +393,6 @@ for dir in "${INPUT_DIR}"/*/ ; do
     else
         echo "Skipping directory ${dir_name} as all files are already processed and up to date"
     fi
-
-    # Create page directory if it doesn't exist
-    mkdir -p "${workspace_dir}/page"
 done
 
 # Clean up temp workspace at the end
