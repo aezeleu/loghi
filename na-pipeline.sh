@@ -42,9 +42,11 @@ DETECTLANGUAGE=1
 SPLITWORDS=1
 BEAMWIDTH=1
 
-# --- CPU MODE CONFIGURATION ---
-GPU=-1 # Force CPU mode
-echo "INFO (na-pipeline.sh): Explicitly configured for CPU mode (GPU=${GPU})."
+# --- GPU MODE CONFIGURATION ---
+# Set to 0 for the first GPU, 1 for the second, etc.
+# Set to -1 to force CPU mode.
+GPU=0 
+echo "INFO (na-pipeline.sh): Configured for GPU mode (GPU=${GPU}). Ensure DinD environment supports GPU passthrough."
 
 DOCKERLOGHITOOLING="loghi/docker.loghi-tooling:${VERSION}" 
 DOCKERLAYPA="loghi/docker.laypa:${VERSION}"
@@ -61,6 +63,7 @@ echo "INFO (na-pipeline.sh): Temporary directory for this run: $tmpdir"
 
 DOCKERGPUPARAMS="" 
 if [[ $GPU -gt -1 ]]; then
+    # This requires the inner dockerd to be NVIDIA aware and configured correctly.
     DOCKERGPUPARAMS="--gpus device=${GPU}"
     echo "INFO (na-pipeline.sh): Attempting to use GPU ${GPU}. DOCKERGPUPARAMS=${DOCKERGPUPARAMS}"
 else
@@ -86,10 +89,8 @@ echo "INFO (na-pipeline.sh): Docker containers will be run as UID: $CURRENT_UID,
 
 if [[ $BASELINELAYPA -eq 1 ]]; then
     echo "INFO (na-pipeline.sh): Starting Laypa baseline detection."
-    # --- CORRECTED: Removed 'local' keyword ---
     laypa_input_dir="$SRC"
     laypa_output_dir="$SRC" 
-    # --- END CORRECTION ---
     LAYPADIR_MODEL_BASE="$(dirname "${LAYPAMODEL}")"
 
     echo "INFO (na-pipeline.sh): Laypa Input Dir: $laypa_input_dir"
@@ -126,7 +127,7 @@ if [[ $BASELINELAYPA -eq 1 ]]; then
     fi
     echo "INFO (na-pipeline.sh): Laypa baseline detection finished."
 
-    page_xml_dir_for_minion="${laypa_output_dir}/page" # Corrected: removed 'local'
+    page_xml_dir_for_minion="${laypa_output_dir}/page" 
     if [ ! -d "$page_xml_dir_for_minion" ]; then
         echo "ERROR (na-pipeline.sh): Laypa did not create the expected directory: $page_xml_dir_for_minion. This means no baselines were detected or Laypa failed silently."
     else
@@ -148,14 +149,14 @@ fi
 
 if [[ $HTRLOGHI -eq 1 ]]; then
     echo "INFO (na-pipeline.sh): Starting Loghi HTR process."
-    page_xml_dir_htr_cut="$SRC/page" # Corrected: removed 'local'
+    page_xml_dir_htr_cut="$SRC/page" 
 
     if [ ! -d "$page_xml_dir_htr_cut" ] || [ -z "$(ls -A "$page_xml_dir_htr_cut"/*.xml 2>/dev/null)" ]; then
          echo "WARNING (na-pipeline.sh): Page XML directory '$page_xml_dir_htr_cut' not found or contains no XML files for MinionCut. HTR line cutting will be skipped."
     else
         echo "INFO (na-pipeline.sh): Running MinionCutFromImageBasedOnPageXMLNew..."
         if ! docker run -u "$CURRENT_UID:$CURRENT_GID" --rm \
-            -v "$SRC:$SRC:ro" \
+            -v "$SRC:$SRC:rw" \
             -v "$tmpdir/imagesnippets/:$tmpdir/imagesnippets/:rw" \
             "$DOCKERLOGHITOOLING" /src/loghi-tooling/minions/target/appassembler/bin/MinionCutFromImageBasedOnPageXMLNew \
             -input_path "$SRC" \
@@ -237,11 +238,10 @@ fi
 
 if [[ $RECALCULATEREADINGORDER -eq 1 ]]; then
     echo "INFO (na-pipeline.sh): Recalculating reading order."
-    page_dir_recalc="$SRC/page/" # Corrected: removed 'local'
+    page_dir_recalc="$SRC/page/" 
     if [ ! -d "$page_dir_recalc" ] || [ -z "$(ls -A "$page_dir_recalc"/*.xml 2>/dev/null)" ]; then
         echo "WARNING (na-pipeline.sh): Page directory '$page_dir_recalc' not found or no XMLs present. Skipping reading order recalculation."
     else
-        # 'local' is fine here as it's a different variable name and used immediately
         local recalc_cmd_args_array=(
             /src/loghi-tooling/minions/target/appassembler/bin/MinionRecalculateReadingOrderNew
             -input_dir "$page_dir_recalc"
@@ -263,7 +263,7 @@ fi
 
 if [[ $DETECTLANGUAGE -eq 1 ]]; then
     echo "INFO (na-pipeline.sh): Detecting language."
-    page_dir_lang="$SRC/page/" # Corrected: removed 'local'
+    page_dir_lang="$SRC/page/" 
      if [ ! -d "$page_dir_lang" ] || [ -z "$(ls -A "$page_dir_lang"/*.xml 2>/dev/null)" ]; then
         echo "WARNING (na-pipeline.sh): Page directory '$page_dir_lang' not found or no XMLs present. Skipping language detection."
     else
@@ -278,7 +278,7 @@ fi
 
 if [[ $SPLITWORDS -eq 1 ]]; then
     echo "INFO (na-pipeline.sh): Splitting words (MinionSplitPageXMLTextLineIntoWords)."
-    page_dir_split="$SRC/page/" # Corrected: removed 'local'
+    page_dir_split="$SRC/page/" 
     if [ ! -d "$page_dir_split" ] || [ -z "$(ls -A "$page_dir_split"/*.xml 2>/dev/null)" ]; then
         echo "WARNING (na-pipeline.sh): Page directory '$page_dir_split' not found or no XMLs present. Skipping word splitting."
     else
