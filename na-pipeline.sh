@@ -43,8 +43,6 @@ SPLITWORDS=1
 BEAMWIDTH=1
 
 # --- GPU MODE CONFIGURATION ---
-# Set to 0 for the first GPU, 1 for the second, etc.
-# Set to -1 to force CPU mode.
 GPU=0 
 echo "INFO (na-pipeline.sh): Configured for GPU mode (GPU=${GPU}). Ensure DinD environment supports GPU passthrough."
 
@@ -63,7 +61,6 @@ echo "INFO (na-pipeline.sh): Temporary directory for this run: $tmpdir"
 
 DOCKERGPUPARAMS="" 
 if [[ $GPU -gt -1 ]]; then
-    # This requires the inner dockerd to be NVIDIA aware and configured correctly.
     DOCKERGPUPARAMS="--gpus device=${GPU}"
     echo "INFO (na-pipeline.sh): Attempting to use GPU ${GPU}. DOCKERGPUPARAMS=${DOCKERGPUPARAMS}"
 else
@@ -238,11 +235,13 @@ fi
 
 if [[ $RECALCULATEREADINGORDER -eq 1 ]]; then
     echo "INFO (na-pipeline.sh): Recalculating reading order."
+    # --- CORRECTED: Removed 'local' keyword ---
     page_dir_recalc="$SRC/page/" 
+    # --- END CORRECTION ---
     if [ ! -d "$page_dir_recalc" ] || [ -z "$(ls -A "$page_dir_recalc"/*.xml 2>/dev/null)" ]; then
         echo "WARNING (na-pipeline.sh): Page directory '$page_dir_recalc' not found or no XMLs present. Skipping reading order recalculation."
     else
-        local recalc_cmd_args_array=(
+        local recalc_cmd_args_array=( # 'local' is fine for this array definition
             /src/loghi-tooling/minions/target/appassembler/bin/MinionRecalculateReadingOrderNew
             -input_dir "$page_dir_recalc"
             -border_margin "$RECALCULATEREADINGORDERBORDERMARGIN"
@@ -263,7 +262,9 @@ fi
 
 if [[ $DETECTLANGUAGE -eq 1 ]]; then
     echo "INFO (na-pipeline.sh): Detecting language."
+    # --- CORRECTED: Removed 'local' keyword ---
     page_dir_lang="$SRC/page/" 
+    # --- END CORRECTION ---
      if [ ! -d "$page_dir_lang" ] || [ -z "$(ls -A "$page_dir_lang"/*.xml 2>/dev/null)" ]; then
         echo "WARNING (na-pipeline.sh): Page directory '$page_dir_lang' not found or no XMLs present. Skipping language detection."
     else
@@ -278,7 +279,9 @@ fi
 
 if [[ $SPLITWORDS -eq 1 ]]; then
     echo "INFO (na-pipeline.sh): Splitting words (MinionSplitPageXMLTextLineIntoWords)."
+    # --- CORRECTED: Removed 'local' keyword ---
     page_dir_split="$SRC/page/" 
+    # --- END CORRECTION ---
     if [ ! -d "$page_dir_split" ] || [ -z "$(ls -A "$page_dir_split"/*.xml 2>/dev/null)" ]; then
         echo "WARNING (na-pipeline.sh): Page directory '$page_dir_split' not found or no XMLs present. Skipping word splitting."
     else
@@ -297,12 +300,17 @@ mkdir -p "$OUT"
 echo "INFO (na-pipeline.sh): Copying original images from $SRC to $OUT"
 find "$SRC" -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.tif" -o -iname "*.tiff" \) -exec cp -p {} "$OUT/" \;
 
+# --- ENHANCED: Copy generated PNGs (baselines/page images) from $SRC/page to $OUT ---
 if [ -d "$SRC/page" ]; then
     echo "INFO (na-pipeline.sh): Copying XML files from $SRC/page to $OUT"
     find "$SRC/page" -maxdepth 1 -type f -name "*.xml" -exec cp -p {} "$OUT/" \;
+    
+    echo "INFO (na-pipeline.sh): Copying generated PNG images (baselines/page images) from $SRC/page to $OUT"
+    find "$SRC/page" -maxdepth 1 -type f -name "*.png" -exec cp -p {} "$OUT/" \;
 else
-    echo "WARNING (na-pipeline.sh): No $SRC/page directory found to copy XMLs from."
+    echo "WARNING (na-pipeline.sh): No $SRC/page directory found to copy XMLs or PNGs from."
 fi
+# --- END ENHANCEMENT ---
 
 echo "INFO (na-pipeline.sh): Cleaning up internal temporary directory: $tmpdir"
 rm -rf "$tmpdir"
