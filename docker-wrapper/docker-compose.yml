@@ -1,58 +1,76 @@
-# version: '3.9'
+# version: '3.9' # Optional: Specifies the Compose file format version
 
-services:
-  loghi-wrapper:
-    build:
-      context: ..
-      dockerfile: ./docker-wrapper/Dockerfile
-    image: loghi-wrapper:latest
+services: # 0 spaces indentation
+  loghi-wrapper: # 2 spaces indentation
+    build: # 4 spaces indentation
+      context: .. 
+      dockerfile: ./docker-wrapper/Dockerfile 
+    image: loghi-wrapper:dind 
     container_name: loghi-wrapper
-    volumes:
-      # Mount Docker socket for Docker-in-Docker functionality
-      - /var/run/docker.sock:/var/run/docker.sock
-      # Mount Git modules
-      - ${LAYPA_MODULE}:/app/laypa
-      - ${LOGHI_HTR_MODULE}:/app/loghi-htr
-      - ${LOGHI_TOOLING_MODULE}:/app/loghi-tooling
-      - ${PRIMA_CORE_LIBS_MODULE}:/app/prima-core-libs
-      # Mount Workspace directory
-      - ${WORKSPACE_PATH}:/workspace
-      - ${DESTINATION_PATH}:/destination
-      # Add volumes for temp directories
-      - loghi_temp:/tmp
-      - loghi_logs:/app/logs
-      - loghi_workspace:/app/temp_workspace
-    environment:
+    privileged: true 
+
+    volumes: # 4 spaces indentation
+      - loghi_dind_storage:/var/lib/docker
+      - ${LAYPA_MODULE:-./submodules/laypa}:/app/laypa
+      - ${LOGHI_HTR_MODULE:-./submodules/loghi-htr}:/app/loghi-htr
+      - ${LOGHI_TOOLING_MODULE:-./submodules/loghi-tooling}:/app/loghi-tooling
+      - ${PRIMA_CORE_LIBS_MODULE:-./submodules/prima-core-libs}:/app/prima-core-libs
+      - ${WORKSPACE_PATH:-./data/pipeline_input}:/workspace
+      - ${DESTINATION_PATH:-./data/pipeline_output}:/destination
+      - loghi_wrapper_logs:/app/logs
+      - loghi_wrapper_tmp:/tmp 
+      - loghi_wrapper_app_temp:/app/temp_workspace
+
+    environment: # 4 spaces indentation
       - TZ=${TZ:-Europe/Amsterdam}
       - ENABLE_CRON=${ENABLE_CRON:-false}
-      - USE_GIT_SUBMODULES=${USE_GIT_SUBMODULES:-false}
-      - WORKSPACE_PATH=/workspace
-      - DESTINATION_PATH=/destination
+      - USE_GIT_SUBMODULES=${USE_GIT_SUBMODULES:-false} 
+      - WORKSPACE_PATH=/workspace         
+      - DESTINATION_PATH=/destination   
       - LANG=en_US.UTF-8
       - LANGUAGE=en_US:en
       - LC_ALL=en_US.UTF-8
-      - MPLCONFIGDIR=/tmp/matplotlib
-    # Run as root to set permissions, then execute commands as ubuntu
-    command: sh -c "
-      mkdir -p /tmp/matplotlib && chmod 777 /tmp/matplotlib &&
-      chmod 777 /tmp && 
-      chmod 777 /app/temp_workspace &&
-      chmod 777 /app/logs &&
-      chmod 666 /var/run/docker.sock &&
-      chown -R ubuntu:ubuntu /app /workspace /tmp /app/logs /app/temp_workspace &&
-      su ubuntu -c 'tail -f /dev/null'"
-    # Don't set the user here, as we need root for initial setup
-    # Uncomment if you need to use GPUs
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
+      - MPLCONFIGDIR=/tmp/matplotlib_cache_wrapper 
 
-volumes:
-  loghi_temp:
-  loghi_logs:
-  loghi_workspace:
-    
+    command: # 4 spaces indentation
+      # The command is specified as a list of arguments: sh, -c, and then the script itself
+      - sh  # 6 spaces indentation (list item)
+      - -c  # 6 spaces indentation (list item)
+      - |   # 6 spaces indentation (list item, introduces a literal block for the script)
+          # Script content starts here, indented more than the "- |" line (e.g., 8 spaces)
+          set -e;
+          echo 'DinD Setup: Starting internal Docker daemon service...';
+          (dockerd > /var/log/dockerd.log 2>&1 &);
+          echo 'DinD Setup: Waiting for Docker daemon to be responsive...';
+          timeout 60s sh -c 'while ! docker info > /dev/null 2>&1; do echo -n "D_ping." ; sleep 1; done';
+          echo; echo 'DinD Setup: Internal Docker daemon is responsive.';
+          echo 'DinD Setup: Setting up directories and permissions...';
+          mkdir -p /tmp/matplotlib_cache_wrapper && chmod -R 0777 /tmp/matplotlib_cache_wrapper;
+          chmod 0777 /tmp;
+          mkdir -p /app/logs && chmod -R 0777 /app/logs;
+          mkdir -p /app/temp_workspace && chmod -R 0777 /app/temp_workspace;
+          echo 'DinD Setup: Chowning relevant directories to ubuntu user...';
+          chown -R ubuntu:ubuntu /app /tmp /app/logs /app/temp_workspace;
+          chown ubuntu:ubuntu /workspace || echo 'Warning: Could not chown /workspace. Host permissions might need adjustment.';
+          chown ubuntu:ubuntu /destination || echo 'Warning: Could not chown /destination. Host permissions might need adjustment.';
+          echo 'DinD Setup: Wrapper container setup complete. Switching to ubuntu user for main process.';
+          su ubuntu -c 'echo "DinD User Context: Now running as user: $(whoami) (UID $(id -u), GID $(id -g))"; \
+                         echo "DinD User Context: Docker version (talking to internal daemon): $(docker --version)"; \
+                         echo "DinD User Context: Docker context should be default (this internal daemon)."; \
+                         echo "DinD User Context: Pipeline scripts will use paths like /tmp/... or /app/temp_workspace/... for WSL_WORK_DIR"; \
+                         echo "DinD User Context: To run your pipeline, exec into this container as ubuntu and run ./workspace_na_pipeline.sh"; \
+                         tail -f /dev/null'
+
+    deploy: # 4 spaces indentation (if uncommented)
+      resources: # 6 spaces indentation
+        reservations: # 8 spaces indentation
+          devices: # 10 spaces indentation
+            - driver: nvidia
+              count: all 
+              capabilities: [gpu]
+
+volumes: # 0 spaces indentation
+  loghi_dind_storage: {}       
+  loghi_wrapper_logs: {}       
+  loghi_wrapper_tmp: {}        
+  loghi_wrapper_app_temp: {}

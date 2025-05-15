@@ -1,20 +1,16 @@
 #!/bin/bash
-VERSION=1.3.7
+VERSION=1.3.7 # Assuming this is the correct version for your tools
 set -e
 
 # Check if source directory is accessible
 check_source_directory() {
-    local src_path="$1"
+    local src_path="$1" # 'local' is correct here as it's inside a function
     if [ ! -d "$src_path" ]; then
-        echo "Error: Source directory '$src_path' does not exist or is not accessible"
+        echo "ERROR (na-pipeline.sh): Source directory '$src_path' does not exist or is not accessible."
         exit 1
     fi
-
-    # Try to list directory contents to verify read permissions
     if ! ls "$src_path" >/dev/null 2>&1; then
-        echo "Error: Cannot access contents of source directory '$src_path'"
-        echo "Please check if the directory is properly mounted and has correct permissions"
-        echo "For Google Drive/Workspace, ensure the drive is properly mounted in WSL"
+        echo "ERROR (na-pipeline.sh): Cannot access contents of source directory '$src_path'."
         exit 1
     fi
 }
@@ -25,155 +21,179 @@ STOPONERROR=1
 # set to 1 if you want to enable, 0 otherwise, select just one
 BASELINELAYPA=1
 
-# # Set the base directory to the project directory
+# Set the base directory to where your models are located *inside the loghi-wrapper container*.
 if [ -z "$BASEDIR" ]; then
-    BASEDIR=/home/default/Companies/Archive/loghi-main # works for Arthur
+    BASEDIR=/app 
+    echo "INFO (na-pipeline.sh): BASEDIR for models set to '$BASEDIR'. Ensure this is correct."
 fi
 
-#
-#LAYPAMODEL=/home/rutger/src/laypa-models/general/baseline/config.yaml
-#LAYPAMODELWEIGHTS=/home/rutger/src/laypa-models/general/baseline/model_best_mIoU.pth
+LAYPAMODEL="${BASEDIR}/laypa/general/baseline/config.yaml"
+LAYPAMODELWEIGHTS="${BASEDIR}/laypa/general/baseline/model_best_mIoU.pth"
 
-# LAYPAMODEL=INSERT_FULL_PATH_TO_YAML_HERE
-LAYPAMODEL=$BASEDIR/laypa/general/baseline/config.yaml
-# LAYPAMODEL=/home/default/loghi-main/laypa/general/baseline/config.yaml
-
-# LAYPAMODELWEIGHTS=INSERT_FULLPATH_TO_PTH_HERE
-LAYPAMODELWEIGHTS=$BASEDIR/laypa/general/baseline/model_best_mIoU.pth
-
-# set to 1 if you want to enable, 0 otherwise, select just one
 HTRLOGHI=1
+HTRLOGHIMODEL="${BASEDIR}/loghi-htr/generic-2023-02-15"
 
-#HTRLOGHIMODEL=/home/rutger/src/loghi-htr-models/republic-2023-01-02-base-generic_new14-2022-12-20-valcer-0.0062
-HTRLOGHIMODEL=$BASEDIR/loghi-htr/generic-2023-02-15
-
-# set this to 1 for recalculating reading order, line clustering and cleaning.
 RECALCULATEREADINGORDER=1
-# if the edge of baseline is closer than x pixels...
 RECALCULATEREADINGORDERBORDERMARGIN=50
-# clean if 1
 RECALCULATEREADINGORDERCLEANBORDERS=0
-# how many threads to use
-RECALCULATEREADINGORDERTHREADS=4
+RECALCULATEREADINGORDERTHREADS=4 
 
-#detect language of pagexml, set to 1 to enable, disable otherwise
 DETECTLANGUAGE=1
-#interpolate word locations
 SPLITWORDS=1
-#BEAMWIDTH: higher makes results slightly better at the expense of lot of computation time. In general don't set higher than 10
 BEAMWIDTH=1
-#used gpu ids, set to "-1" to use CPU, "0" for first, "1" for second, etc
-GPU=0
 
-DOCKERLOGHITOOLING=loghi/docker.loghi-tooling:$VERSION
-DOCKERLAYPA=loghi/docker.laypa:$VERSION
-DOCKERLOGHIHTR=loghi/docker.htr:$VERSION
+# --- CPU MODE CONFIGURATION ---
+GPU=-1 # Force CPU mode
+echo "INFO (na-pipeline.sh): Explicitly configured for CPU mode (GPU=${GPU})."
+
+DOCKERLOGHITOOLING="loghi/docker.loghi-tooling:${VERSION}" 
+DOCKERLAYPA="loghi/docker.laypa:${VERSION}"
+DOCKERLOGHIHTR="loghi/docker.htr:${VERSION}"
 USE2013NAMESPACE=" -use_2013_namespace "
 
-# DO NO EDIT BELOW THIS LINE
-if [ -z $1 ]; then echo "please provide path to images to be HTR-ed" && exit 1; fi;
-if [ -z $2 ]; then echo "please provide path to result directory" && exit 1; fi;
+if [ -z "$1" ]; then echo "ERROR (na-pipeline.sh): please provide path to images to be HTR-ed" && exit 1; fi;
+if [ -z "$2" ]; then echo "ERROR (na-pipeline.sh): please provide path to result directory" && exit 1; fi;
 
-# Check source directory before proceeding
 check_source_directory "$1"
 
-tmpdir=$(mktemp -d)
-echo $tmpdir
+tmpdir=$(mktemp -d) 
+echo "INFO (na-pipeline.sh): Temporary directory for this run: $tmpdir"
 
-DOCKERGPUPARAMS=""
+DOCKERGPUPARAMS="" 
 if [[ $GPU -gt -1 ]]; then
-        DOCKERGPUPARAMS="--gpus device=${GPU}"
-        echo "using GPU ${GPU}"
+    DOCKERGPUPARAMS="--gpus device=${GPU}"
+    echo "INFO (na-pipeline.sh): Attempting to use GPU ${GPU}. DOCKERGPUPARAMS=${DOCKERGPUPARAMS}"
+else
+    echo "INFO (na-pipeline.sh): Using CPU. DOCKERGPUPARAMS will be empty."
 fi
 
-SRC=`realpath $1`
-OUT=`realpath $2`
-echo OUT: ${OUT}
-# exit;
+SRC="$1" 
+OUT="$2" 
+echo "INFO (na-pipeline.sh): Source (SRC): ${SRC}"
+echo "INFO (na-pipeline.sh): Output (OUT): ${OUT}"
 
-mkdir $tmpdir/imagesnippets/
-mkdir $tmpdir/linedetection
-mkdir $tmpdir/output
+mkdir -p "$OUT"
 
+mkdir -p "$tmpdir/imagesnippets/"
+mkdir -p "$tmpdir/linedetection" 
+mkdir -p "$tmpdir/output_htr_internal" 
 
-find $SRC -name '*.done' -exec rm -f "{}" \;
+find "$SRC" -name '*.done' -exec rm -f "{}" \;
 
+CURRENT_UID=$(id -u)
+CURRENT_GID=$(id -g)
+echo "INFO (na-pipeline.sh): Docker containers will be run as UID: $CURRENT_UID, GID: $CURRENT_GID"
 
-if [[ $BASELINELAYPA -eq 1 ]]
-then
-        echo "starting Laypa baseline detection"
+if [[ $BASELINELAYPA -eq 1 ]]; then
+    echo "INFO (na-pipeline.sh): Starting Laypa baseline detection."
+    # --- CORRECTED: Removed 'local' keyword ---
+    laypa_input_dir="$SRC"
+    laypa_output_dir="$SRC" 
+    # --- END CORRECTION ---
+    LAYPADIR_MODEL_BASE="$(dirname "${LAYPAMODEL}")"
 
-        input_dir=$SRC
-        output_dir=$SRC
-        LAYPADIR="$(dirname "${LAYPAMODEL}")"
+    echo "INFO (na-pipeline.sh): Laypa Input Dir: $laypa_input_dir"
+    echo "INFO (na-pipeline.sh): Laypa Output Dir (for page/ XMLs): $laypa_output_dir"
+    echo "INFO (na-pipeline.sh): Laypa Model Base Dir (for volume mount): $LAYPADIR_MODEL_BASE"
+    echo "INFO (na-pipeline.sh): Laypa Config: $LAYPAMODEL"
+    echo "INFO (na-pipeline.sh): Laypa Weights: $LAYPAMODELWEIGHTS"
 
-        if [[ ! -d $input_dir ]]; then
-                echo "Specified input dir (${input_dir}) does not exist, stopping program"
-                exit 1
+    if [ ! -f "$LAYPAMODEL" ] || [ ! -f "$LAYPAMODELWEIGHTS" ]; then
+        echo "ERROR (na-pipeline.sh): Laypa model or weights not found at expected paths:"
+        echo "  Config: $LAYPAMODEL"
+        echo "  Weights: $LAYPAMODELWEIGHTS"
+        echo "  Please check BASEDIR and model paths in na-pipeline.sh."
+        if [[ $STOPONERROR -eq 1 ]]; then exit 1; fi
+    fi
+    
+    if ! docker image inspect "$DOCKERLAYPA" > /dev/null 2>&1; then
+        echo "WARNING (na-pipeline.sh): Docker image $DOCKERLAYPA not found by inner Docker daemon. Attempting to pull..."
+        docker pull "$DOCKERLAYPA" || (echo "ERROR (na-pipeline.sh): Failed to pull $DOCKERLAYPA" && exit 1)
+    fi
+
+    if ! docker run $DOCKERGPUPARAMS --rm -u "$CURRENT_UID:$CURRENT_GID" -m 32000m --shm-size 10240m \
+        -v "$LAYPADIR_MODEL_BASE:$LAYPADIR_MODEL_BASE:ro" \
+        -v "$laypa_input_dir:$laypa_input_dir:rw" \
+        -v "$laypa_output_dir:$laypa_output_dir:rw" \
+        "$DOCKERLAYPA" \
+        python run.py \
+        -c "$LAYPAMODEL" \
+        -i "$laypa_input_dir" \
+        -o "$laypa_output_dir" \
+        --opts MODEL.WEIGHTS "" TEST.WEIGHTS "$LAYPAMODELWEIGHTS" 2>&1 | tee -a "$tmpdir/log_laypa.txt"; then
+        echo "ERROR (na-pipeline.sh): Laypa baseline detection failed. Check $tmpdir/log_laypa.txt"
+        if [[ $STOPONERROR -eq 1 ]]; then exit 1; fi
+    fi
+    echo "INFO (na-pipeline.sh): Laypa baseline detection finished."
+
+    page_xml_dir_for_minion="${laypa_output_dir}/page" # Corrected: removed 'local'
+    if [ ! -d "$page_xml_dir_for_minion" ]; then
+        echo "ERROR (na-pipeline.sh): Laypa did not create the expected directory: $page_xml_dir_for_minion. This means no baselines were detected or Laypa failed silently."
+    else
+        echo "INFO (na-pipeline.sh): Running MinionExtractBaselines..."
+        if ! docker run --rm -u "$CURRENT_UID:$CURRENT_GID" \
+            -v "$page_xml_dir_for_minion:$page_xml_dir_for_minion:rw" \
+            "$DOCKERLOGHITOOLING" /src/loghi-tooling/minions/target/appassembler/bin/MinionExtractBaselines \
+            -input_path_png "$page_xml_dir_for_minion/" \
+            -input_path_page "$page_xml_dir_for_minion/" \
+            -output_path_page "$page_xml_dir_for_minion/" \
+            -as_single_region true $USE2013NAMESPACE 2>&1 | tee -a "$tmpdir/log_minionextract.txt"; then
+            echo "ERROR (na-pipeline.sh): MinionExtractBaselines failed. Check $tmpdir/log_minionextract.txt"
+            if [[ $STOPONERROR -eq 1 ]]; then exit 1; fi
         fi
-
-        if [[ ! -d $output_dir ]]; then
-                echo "Could not find output dir (${output_dir}), creating one at specified location"
-                mkdir -p $output_dir
-        fi
-
-        echo "Running Laypa baseline detection..."
-        if ! docker run $DOCKERGPUPARAMS --rm -u $(id -u ${USER}):$(id -g ${USER}) -m 32000m --shm-size 10240m \
-            -v "$LAYPADIR:$LAYPADIR" \
-            -v "$input_dir:$input_dir" \
-            -v "$output_dir:$output_dir" \
-            $DOCKERLAYPA \
-            python run.py \
-            -c "$LAYPAMODEL" \
-            -i "$input_dir" \
-            -o "$output_dir" \
-            --opts MODEL.WEIGHTS "" TEST.WEIGHTS "$LAYPAMODELWEIGHTS" 2>&1 | tee -a "$tmpdir/log.txt"; then
-            echo "Error: Laypa baseline detection failed"
-            exit 1
-        fi
-
-        echo "Running MinionExtractBaselines..."
-        if ! docker run --rm -u $(id -u ${USER}):$(id -g ${USER}) \
-            -v "$output_dir:$output_dir" \
-            $DOCKERLOGHITOOLING /src/loghi-tooling/minions/target/appassembler/bin/MinionExtractBaselines \
-            -input_path_png "$output_dir/page/" \
-            -input_path_page "$output_dir/page/" \
-            -output_path_page "$output_dir/page/" \
-            -as_single_region true $USE2013NAMESPACE 2>&1 | tee -a "$tmpdir/log.txt"; then
-            echo "Error: MinionExtractBaselines failed"
-            exit 1
-        fi
+        echo "INFO (na-pipeline.sh): MinionExtractBaselines finished."
+    fi
 fi
 
-# #HTR option 1 LoghiHTR
-if [[ $HTRLOGHI -eq 1 ]]
-then
-        echo "starting Loghi HTR"
-        
-        echo "Running MinionCutFromImageBasedOnPageXMLNew..."
-        if ! docker run -u $(id -u ${USER}):$(id -g ${USER}) --rm \
-            -v "$SRC:$SRC" \
-            -v "$tmpdir:$tmpdir" \
-            $DOCKERLOGHITOOLING /src/loghi-tooling/minions/target/appassembler/bin/MinionCutFromImageBasedOnPageXMLNew \
+
+if [[ $HTRLOGHI -eq 1 ]]; then
+    echo "INFO (na-pipeline.sh): Starting Loghi HTR process."
+    page_xml_dir_htr_cut="$SRC/page" # Corrected: removed 'local'
+
+    if [ ! -d "$page_xml_dir_htr_cut" ] || [ -z "$(ls -A "$page_xml_dir_htr_cut"/*.xml 2>/dev/null)" ]; then
+         echo "WARNING (na-pipeline.sh): Page XML directory '$page_xml_dir_htr_cut' not found or contains no XML files for MinionCut. HTR line cutting will be skipped."
+    else
+        echo "INFO (na-pipeline.sh): Running MinionCutFromImageBasedOnPageXMLNew..."
+        if ! docker run -u "$CURRENT_UID:$CURRENT_GID" --rm \
+            -v "$SRC:$SRC:ro" \
+            -v "$tmpdir/imagesnippets/:$tmpdir/imagesnippets/:rw" \
+            "$DOCKERLOGHITOOLING" /src/loghi-tooling/minions/target/appassembler/bin/MinionCutFromImageBasedOnPageXMLNew \
             -input_path "$SRC" \
             -outputbase "$tmpdir/imagesnippets/" \
             -output_type png \
             -channels 4 \
-            -threads 4 $USE2013NAMESPACE 2>&1 | tee -a "$tmpdir/log.txt"; then
-            echo "Error: MinionCutFromImageBasedOnPageXMLNew failed"
-            exit 1
+            -threads $RECALCULATEREADINGORDERTHREADS $USE2013NAMESPACE 2>&1 | tee -a "$tmpdir/log_minioncut.txt"; then
+            echo "ERROR (na-pipeline.sh): MinionCutFromImageBasedOnPageXMLNew failed. Check $tmpdir/log_minioncut.txt"
+            if [[ $STOPONERROR -eq 1 ]]; then exit 1; fi
+        fi
+        echo "INFO (na-pipeline.sh): MinionCutFromImageBasedOnPageXMLNew finished."
+    fi 
+
+    find "$tmpdir/imagesnippets/" -type f -name '*.png' > "$tmpdir/lines.txt"
+    if [ ! -s "$tmpdir/lines.txt" ]; then
+        echo "WARNING (na-pipeline.sh): No image snippets found in $tmpdir/imagesnippets/ (lines.txt is empty). HTR will not run."
+    else
+        LOGHIDIR_MODEL_BASE="$(dirname "${HTRLOGHIMODEL}")"
+        echo "INFO (na-pipeline.sh): HTR Model Base Dir (for volume mount): $LOGHIDIR_MODEL_BASE"
+        echo "INFO (na-pipeline.sh): HTR Model Path: $HTRLOGHIMODEL"
+
+        if [ ! -f "$HTRLOGHIMODEL/charlist.txt" ] || [ ! -d "$HTRLOGHIMODEL" ]; then
+             echo "ERROR (na-pipeline.sh): HTR model or charlist not found at expected paths:"
+             echo "  Model Dir: $HTRLOGHIMODEL"
+             echo "  Charlist: $HTRLOGHIMODEL/charlist.txt"
+             if [[ $STOPONERROR -eq 1 ]]; then exit 1; fi
+        fi
+        
+        if ! docker image inspect "$DOCKERLOGHIHTR" > /dev/null 2>&1; then
+            echo "WARNING (na-pipeline.sh): Docker image $DOCKERLOGHIHTR not found by inner Docker daemon. Attempting to pull..."
+            docker pull "$DOCKERLOGHIHTR" || (echo "ERROR (na-pipeline.sh): Failed to pull $DOCKERLOGHIHTR" && exit 1)
         fi
 
-        find "$tmpdir/imagesnippets/" -type f -name '*.png' > "$tmpdir/lines.txt"
-
-        LOGHIDIR="$(dirname "${HTRLOGHIMODEL}")"
-        
-        echo "Running Loghi HTR..."
-        if ! docker run $DOCKERGPUPARAMS -u $(id -u ${USER}):$(id -g ${USER}) --rm -m 32000m --shm-size 10240m \
-            -v /tmp:/tmp \
-            -v "$tmpdir:$tmpdir" \
-            -v "$LOGHIDIR:$LOGHIDIR" \
-            $DOCKERLOGHIHTR \
+        echo "INFO (na-pipeline.sh): Running Loghi HTR..."
+        if ! docker run $DOCKERGPUPARAMS -u "$CURRENT_UID:$CURRENT_GID" --rm -m 32000m --shm-size 10240m \
+            -v "$tmpdir:$tmpdir:rw" \
+            -v "$LOGHIDIR_MODEL_BASE:$LOGHIDIR_MODEL_BASE:ro" \
+            "$DOCKERLOGHIHTR" \
             bash -c "LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.so.4 python3 /src/loghi-htr/src/main.py \
             --do_inference \
             --existing_model $HTRLOGHIMODEL \
@@ -183,92 +203,108 @@ then
             --results_file $tmpdir/results.txt \
             --charlist $HTRLOGHIMODEL/charlist.txt \
             --gpu $GPU \
-            --output $tmpdir/output/ \
-            --config_file_output $tmpdir/output/config.json \
-            --beam_width $BEAMWIDTH" 2>&1 | tee -a "$tmpdir/log.txt"; then
-            echo "Error: Loghi HTR failed"
-            exit 1
+            --output $tmpdir/output_htr_internal/ \
+            --config_file_output $tmpdir/output_htr_internal/config.json \
+            --beam_width $BEAMWIDTH" 2>&1 | tee -a "$tmpdir/log_htr.txt"; then
+            echo "ERROR (na-pipeline.sh): Loghi HTR failed. Check $tmpdir/log_htr.txt"
+            if [[ $STOPONERROR -eq 1 ]]; then exit 1; fi
         fi
+        echo "INFO (na-pipeline.sh): Loghi HTR finished."
 
-        echo "Running MinionLoghiHTRMergePageXML..."
-        if ! docker run -u $(id -u ${USER}):$(id -g ${USER}) --rm \
-            -v "$LOGHIDIR:$LOGHIDIR" \
-            -v "$SRC:$SRC" \
-            -v "$tmpdir:$tmpdir" \
-            $DOCKERLOGHITOOLING /src/loghi-tooling/minions/target/appassembler/bin/MinionLoghiHTRMergePageXML \
-            -input_path "$SRC/page" \
-            -results_file "$tmpdir/results.txt" \
-            -config_file "$HTRLOGHIMODEL/config.json" \
-            -htr_code_config_file "$tmpdir/output/config.json" $USE2013NAMESPACE 2>&1 | tee -a "$tmpdir/log.txt"; then
-            echo "Error: MinionLoghiHTRMergePageXML failed"
-            exit 1
-        fi
-fi
-
-if [[ $RECALCULATEREADINGORDER -eq 1 ]]
-then
-        echo "recalculating reading order"
-        if [[ $RECALCULATEREADINGORDERCLEANBORDERS -eq 1 ]]
-        then
-                echo "and cleaning"
-                docker run -u $(id -u ${USER}):$(id -g ${USER}) --rm -v $SRC/:$SRC/ -v $tmpdir:$tmpdir $DOCKERLOGHITOOLING /src/loghi-tooling/minions/target/appassembler/bin/MinionRecalculateReadingOrderNew \
-                        -input_dir $SRC/page/ \
-			-border_margin $RECALCULATEREADINGORDERBORDERMARGIN \
-			-clean_borders \
-			-threads $RECALCULATEREADINGORDERTHREADS $USE2013NAMESPACE | tee -a $tmpdir/log.txt
-
-                if [[ $STOPONERROR && $? -ne 0 ]]; then
-                        echo "MinionRecalculateReadingOrderNew has errored, stopping program"
-                        exit 1
-                fi
+        if [ ! -f "$tmpdir/results.txt" ]; then
+             echo "WARNING (na-pipeline.sh): HTR results file '$tmpdir/results.txt' not found. Skipping merge."
+        elif [ ! -d "$SRC/page" ]; then
+             echo "WARNING (na-pipeline.sh): Page XML directory '$SRC/page' not found for merging. Skipping merge."
         else
-                docker run -u $(id -u ${USER}):$(id -g ${USER}) --rm -v $SRC/:$SRC/ -v $tmpdir:$tmpdir $DOCKERLOGHITOOLING /src/loghi-tooling/minions/target/appassembler/bin/MinionRecalculateReadingOrderNew \
-                        -input_dir $SRC/page/ \
-			-border_margin $RECALCULATEREADINGORDERBORDERMARGIN \
-			-threads $RECALCULATEREADINGORDERTHREADS $USE2013NAMESPACE| tee -a $tmpdir/log.txt
-
-                if [[ $STOPONERROR && $? -ne 0 ]]; then
-                        echo "MinionRecalculateReadingOrderNew has errored, stopping program"
-                        exit 1
-                fi
+            echo "INFO (na-pipeline.sh): Running MinionLoghiHTRMergePageXML..."
+            if ! docker run -u "$CURRENT_UID:$CURRENT_GID" --rm \
+                -v "$LOGHIDIR_MODEL_BASE:$LOGHIDIR_MODEL_BASE:ro" \
+                -v "$SRC/page:$SRC/page:rw" \
+                -v "$tmpdir:$tmpdir:ro" \
+                "$DOCKERLOGHITOOLING" /src/loghi-tooling/minions/target/appassembler/bin/MinionLoghiHTRMergePageXML \
+                -input_path "$SRC/page" \
+                -results_file "$tmpdir/results.txt" \
+                -config_file "$HTRLOGHIMODEL/config.json" \
+                -htr_code_config_file "$tmpdir/output_htr_internal/config.json" $USE2013NAMESPACE 2>&1 | tee -a "$tmpdir/log_minionmerge.txt"; then
+                echo "ERROR (na-pipeline.sh): MinionLoghiHTRMergePageXML failed. Check $tmpdir/log_minionmerge.txt"
+                if [[ $STOPONERROR -eq 1 ]]; then exit 1; fi
+            fi
+            echo "INFO (na-pipeline.sh): MinionLoghiHTRMergePageXML finished."
         fi
-fi
-if [[ $DETECTLANGUAGE -eq 1 ]]
-then
-        echo "detecting language..."
-        docker run -u $(id -u ${USER}):$(id -g ${USER}) --rm -v $SRC/:$SRC/ -v $tmpdir:$tmpdir $DOCKERLOGHITOOLING /src/loghi-tooling/minions/target/appassembler/bin/MinionDetectLanguageOfPageXml \
-                -page $SRC/page/ $USE2013NAMESPACE | tee -a $tmpdir/log.txt
+    fi 
+fi 
 
 
-        if [[ $STOPONERROR && $? -ne 0 ]]; then
-                echo "MinionDetectLanguageOfPageXml has errored, stopping program"
-                exit 1
+if [[ $RECALCULATEREADINGORDER -eq 1 ]]; then
+    echo "INFO (na-pipeline.sh): Recalculating reading order."
+    page_dir_recalc="$SRC/page/" # Corrected: removed 'local'
+    if [ ! -d "$page_dir_recalc" ] || [ -z "$(ls -A "$page_dir_recalc"/*.xml 2>/dev/null)" ]; then
+        echo "WARNING (na-pipeline.sh): Page directory '$page_dir_recalc' not found or no XMLs present. Skipping reading order recalculation."
+    else
+        # 'local' is fine here as it's a different variable name and used immediately
+        local recalc_cmd_args_array=(
+            /src/loghi-tooling/minions/target/appassembler/bin/MinionRecalculateReadingOrderNew
+            -input_dir "$page_dir_recalc"
+            -border_margin "$RECALCULATEREADINGORDERBORDERMARGIN"
+            -threads "$RECALCULATEREADINGORDERTHREADS"
+            $USE2013NAMESPACE
+        )
+        if [[ $RECALCULATEREADINGORDERCLEANBORDERS -eq 1 ]]; then
+            recalc_cmd_args_array+=("-clean_borders")
         fi
-fi
-
-
-if [[ $SPLITWORDS -eq 1 ]]
-then
-        echo "MinionSplitPageXMLTextLineIntoWords..."
-        docker run -u $(id -u ${USER}):$(id -g ${USER}) --rm -v $SRC/:$SRC/ -v $tmpdir:$tmpdir $DOCKERLOGHITOOLING /src/loghi-tooling/minions/target/appassembler/bin/MinionSplitPageXMLTextLineIntoWords \
-                -input_path $SRC/page/ $USE2013NAMESPACE | tee -a $tmpdir/log.txt
-
-        if [[ $STOPONERROR && $? -ne 0 ]]; then
-                echo "MinionSplitPageXMLTextLineIntoWords has errored, stopping program"
-                exit 1
+        
+        if ! docker run -u "$CURRENT_UID:$CURRENT_GID" --rm -v "$page_dir_recalc:$page_dir_recalc:rw" "$DOCKERLOGHITOOLING" "${recalc_cmd_args_array[@]}" 2>&1 | tee -a "$tmpdir/log_recalcorder.txt"; then
+            echo "ERROR (na-pipeline.sh): MinionRecalculateReadingOrderNew failed. Check $tmpdir/log_recalcorder.txt"
+            if [[ $STOPONERROR -eq 1 ]]; then exit 1; fi
         fi
+        echo "INFO (na-pipeline.sh): MinionRecalculateReadingOrderNew finished."
+    fi
 fi
 
-# cleanup results
-rm -rf $tmpdir
+if [[ $DETECTLANGUAGE -eq 1 ]]; then
+    echo "INFO (na-pipeline.sh): Detecting language."
+    page_dir_lang="$SRC/page/" # Corrected: removed 'local'
+     if [ ! -d "$page_dir_lang" ] || [ -z "$(ls -A "$page_dir_lang"/*.xml 2>/dev/null)" ]; then
+        echo "WARNING (na-pipeline.sh): Page directory '$page_dir_lang' not found or no XMLs present. Skipping language detection."
+    else
+        if ! docker run -u "$CURRENT_UID:$CURRENT_GID" --rm -v "$page_dir_lang:$page_dir_lang:rw" "$DOCKERLOGHITOOLING" /src/loghi-tooling/minions/target/appassembler/bin/MinionDetectLanguageOfPageXml \
+            -page "$page_dir_lang" $USE2013NAMESPACE 2>&1 | tee -a "$tmpdir/log_detectlang.txt"; then
+            echo "ERROR (na-pipeline.sh): MinionDetectLanguageOfPageXml failed. Check $tmpdir/log_detectlang.txt"
+            if [[ $STOPONERROR -eq 1 ]]; then exit 1; fi
+        fi
+        echo "INFO (na-pipeline.sh): MinionDetectLanguageOfPageXml finished."
+    fi
+fi
 
-# make output dir and copy required files
-mkdir -p "$OUT/"
+if [[ $SPLITWORDS -eq 1 ]]; then
+    echo "INFO (na-pipeline.sh): Splitting words (MinionSplitPageXMLTextLineIntoWords)."
+    page_dir_split="$SRC/page/" # Corrected: removed 'local'
+    if [ ! -d "$page_dir_split" ] || [ -z "$(ls -A "$page_dir_split"/*.xml 2>/dev/null)" ]; then
+        echo "WARNING (na-pipeline.sh): Page directory '$page_dir_split' not found or no XMLs present. Skipping word splitting."
+    else
+        if ! docker run -u "$CURRENT_UID:$CURRENT_GID" --rm -v "$page_dir_split:$page_dir_split:rw" "$DOCKERLOGHITOOLING" /src/loghi-tooling/minions/target/appassembler/bin/MinionSplitPageXMLTextLineIntoWords \
+            -input_path "$page_dir_split" $USE2013NAMESPACE 2>&1 | tee -a "$tmpdir/log_splitwords.txt"; then
+            echo "ERROR (na-pipeline.sh): MinionSplitPageXMLTextLineIntoWords failed. Check $tmpdir/log_splitwords.txt"
+            if [[ $STOPONERROR -eq 1 ]]; then exit 1; fi
+        fi
+        echo "INFO (na-pipeline.sh): MinionSplitPageXMLTextLineIntoWords finished."
+    fi
+fi
 
-# Copy source images (assuming common image extensions)
-find "$SRC" -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.tif" -o -iname "*.tiff" \) -exec cp {} "$OUT/" \;
+echo "INFO (na-pipeline.sh): Copying results to specified output directory: $OUT"
+mkdir -p "$OUT" 
 
-# Copy XML files from page directory, excluding baseline images
-find "$SRC/page" -type f -name "*.xml" -exec cp {} "$OUT/" \;
+echo "INFO (na-pipeline.sh): Copying original images from $SRC to $OUT"
+find "$SRC" -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.tif" -o -iname "*.tiff" \) -exec cp -p {} "$OUT/" \;
 
+if [ -d "$SRC/page" ]; then
+    echo "INFO (na-pipeline.sh): Copying XML files from $SRC/page to $OUT"
+    find "$SRC/page" -maxdepth 1 -type f -name "*.xml" -exec cp -p {} "$OUT/" \;
+else
+    echo "WARNING (na-pipeline.sh): No $SRC/page directory found to copy XMLs from."
+fi
 
+echo "INFO (na-pipeline.sh): Cleaning up internal temporary directory: $tmpdir"
+rm -rf "$tmpdir"
+
+echo "INFO (na-pipeline.sh): na-pipeline.sh finished successfully."
