@@ -1,35 +1,30 @@
-# version: '3.9'
+# Top-level 'version' attribute is obsolete and removed.
 
 services:
   loghi-wrapper:
     build:
-      context: ..
-      dockerfile: ./docker-wrapper/Dockerfile
-    image: loghi-wrapper:dind-gpu 
+      context: .. 
+      dockerfile: ./docker-wrapper/Dockerfile 
+    image: loghi-wrapper:dind-gpu-cron 
     container_name: loghi-wrapper
-    privileged: true # For DinD
+    privileged: true 
 
-    # GPU access for the loghi-wrapper container itself from the host
-    # This makes the host GPUs available to the loghi-wrapper.
-    # The inner dockerd then needs to be configured to use them.
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: all # Or specify a number, e.g., 1
+              count: all 
               capabilities: [gpu]
 
     volumes:
-      - loghi_dind_storage:/var/lib/docker # For the inner Docker daemon's data
-      # Host mounts for your project code and data
+      - loghi_dind_storage:/var/lib/docker 
       - ${LAYPA_MODULE:-./submodules/laypa}:/app/laypa
       - ${LOGHI_HTR_MODULE:-./submodules/loghi-htr}:/app/loghi-htr
       - ${LOGHI_TOOLING_MODULE:-./submodules/loghi-tooling}:/app/loghi-tooling
       - ${PRIMA_CORE_LIBS_MODULE:-./submodules/prima-core-libs}:/app/prima-core-libs
       - ${WORKSPACE_PATH:-./data/pipeline_input}:/workspace
       - ${DESTINATION_PATH:-./data/pipeline_output}:/destination
-      # Named volumes for wrapper's internal use
       - loghi_wrapper_logs:/app/logs
       - loghi_wrapper_tmp:/tmp 
       - loghi_wrapper_app_temp:/app/temp_workspace
@@ -42,30 +37,17 @@ services:
       - LANGUAGE=en_US:en
       - LC_ALL=en_US.UTF-8
       - MPLCONFIGDIR=/tmp/matplotlib_cache_wrapper
-      # Propagate NVIDIA environment variables needed for CUDA applications inside the wrapper
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - CRON_SCHEDULE=${CRON_SCHEDULE:-*/2 * * * *} 
 
-    command: # Startup command for loghi-wrapper
+    command:
       - sh
       - -c
       - |
           set -e;
-          echo 'DinD GPU Setup: Starting internal Docker daemon service...';
-          
-          # Configure the inner Docker daemon for NVIDIA runtime
-          echo 'DinD GPU Setup: Configuring inner Docker daemon (daemon.json) for NVIDIA runtime...';
+          echo 'SETUP: Configuring inner Docker daemon (daemon.json) for NVIDIA runtime...';
           mkdir -p /etc/docker;
-          # This daemon.json enables the nvidia-container-runtime
-          # It assumes nvidia-container-runtime is installed and discoverable
-          # Default runtime is still runc, but nvidia runtime is made available.
-          # Tools must explicitly request it or it must be set as default.
-          # For simplicity, we'll try to make it default if nvidia-container-runtime-hook is present.
-          # A more robust way is to ensure nvidia-docker2 package also installs /etc/docker/daemon.json,
-          # or to use nvidia-ctk runtime configure --runtime=docker --config=/etc/docker/daemon.json
-          
-          # Simple daemon.json configuration
-          # If nvidia-container-runtime is available, this should allow --gpus flag to work
           cat <<EOF > /etc/docker/daemon.json
           {
               "runtimes": {
@@ -77,36 +59,101 @@ services:
               "default-runtime": "nvidia" 
           }
           EOF
-          echo "DinD GPU Setup: Inner daemon.json configured:";
-          cat /etc/docker/daemon.json;
+          echo "SETUP: Inner daemon.json configured.";
 
-          # Start inner Docker daemon
-          (dockerd --host=unix:///var/run/docker.sock --host=tcp://0.0.0.0:2375 > /var/log/dockerd.log 2>&1 &);
+          echo 'SETUP: Starting internal Docker daemon service...';
+          # Define DOCKERD_LOG_FILE as a shell variable
+          _DOCKERD_LOG_FILE="/var/log/dockerd.log";
+          # Ensure the log directory exists and the file can be created
+          mkdir -p "$$(dirname "$$_DOCKERD_LOG_FILE")"; # Use $$ for shell expansion
+          touch "$$_DOCKERD_LOG_FILE"; # Use $$ for shell expansion
+          (dockerd --host=unix:///var/run/docker.sock --host=tcp://0.0.0.0:2375 > "$$_DOCKERD_LOG_FILE" 2>&1 &);
           
-          echo 'DinD GPU Setup: Waiting for Docker daemon to be responsive...';
-          timeout 60s sh -c 'while ! docker -H unix:///var/run/docker.sock info > /dev/null 2>&1; do echo -n "D_ping." ; sleep 1; done';
-          echo; echo 'DinD GPU Setup: Internal Docker daemon is responsive.';
+          echo 'SETUP: Waiting for Docker daemon to be responsive...';
+          # Define DOCKER_START_TIMEOUT as a shell variable
+          _DOCKER_START_TIMEOUT=120; 
+          # Use the shell variable directly in the timeout command
+          if ! timeout "$$_DOCKER_START_TIMEOUT" sh -c \
+            'while ! docker -H unix:///var/run/docker.sock info > /dev/null 2>&1; do echo -n "D_ping." ; sleep 1; done' ; then
+            echo; echo "SETUP_ERROR: Docker daemon did not become responsive within $$_DOCKER_START_TIMEOUT seconds." >&2;
+            echo "SETUP_ERROR: Displaying last 50 lines of dockerd log ($$_DOCKERD_LOG_FILE):" >&2;
+            tail -n 50 "$$_DOCKERD_LOG_FILE" >&2 || echo "SETUP_ERROR: Could not read dockerd log '$$_DOCKERD_LOG_FILE'." >&2;
+            exit 1; 
+          fi
+          echo; echo 'SETUP: Internal Docker daemon is responsive.';
           
-          echo 'DinD GPU Setup: Setting up directories and permissions...';
+          echo 'SETUP: Setting up directories and permissions...';
           mkdir -p /tmp/matplotlib_cache_wrapper && chmod -R 0777 /tmp/matplotlib_cache_wrapper;
           chmod 0777 /tmp;
-          mkdir -p /app/logs && chmod -R 0777 /app/logs;
+          mkdir -p /app/logs && chmod -R 0777 /app/logs; 
           mkdir -p /app/temp_workspace && chmod -R 0777 /app/temp_workspace;
           
-          echo 'DinD GPU Setup: Chowning relevant directories to ubuntu user...';
+          echo 'SETUP: Chowning relevant directories to ubuntu user...';
           chown -R ubuntu:ubuntu /app /tmp /app/logs /app/temp_workspace /home/ubuntu;
           chown ubuntu:ubuntu /workspace || echo 'Warning: Could not chown /workspace';
           chown ubuntu:ubuntu /destination || echo 'Warning: Could not chown /destination';
+
+          echo 'CRON_SETUP: Creating crontab content for ubuntu user...';
+          _CRON_LOG_FILE="/app/logs/pipeline_cron_runs.log";
+          # ${CRON_SCHEDULE} is an environment variable from docker-compose, correctly substituted.
+          # $$_CRON_LOG_FILE will become $_CRON_LOG_FILE for the shell.
+          _CRON_JOB_LINE="${CRON_SCHEDULE} /usr/bin/flock -n /tmp/pipeline_cron.lock -c '/bin/bash /app/workspace_na_pipeline.sh /workspace /destination >> $$_CRON_LOG_FILE 2>&1'";
           
-          echo 'DinD GPU Setup: Wrapper container setup complete. Switching to ubuntu user for main process.';
-          su ubuntu -c 'echo "DinD GPU User Context: Now running as user: $(whoami) (UID $(id -u), GID $(id -g))"; \
-                         echo "DinD GPU User Context: NVIDIA SMI (should show GPUs if passthrough works):"; \
-                         nvidia-smi || echo "nvidia-smi not found or failed (GPU passthrough to wrapper might be an issue)"; \
-                         echo "DinD GPU User Context: Docker version (talking to internal daemon): $(docker --version)"; \
-                         echo "DinD GPU User Context: Inner Docker Info (check runtimes):"; \
+          echo "CRON_SETUP: Generated cron job line will be: $$_CRON_JOB_LINE"; 
+          echo "$$_CRON_JOB_LINE" > /tmp/ubuntu_crontab; 
+          
+          echo "CRON_SETUP: Attempting to install crontab for ubuntu user...";
+          if crontab -u ubuntu /tmp/ubuntu_crontab; then
+            echo 'CRON_SETUP: Crontab installed for ubuntu user successfully.';
+          else
+            echo 'CRON_SETUP_ERROR: Failed to install crontab for ubuntu user.' >&2;
+          fi
+          rm -f /tmp/ubuntu_crontab; 
+
+          echo 'CRON_SETUP: Verifying crontab installation for ubuntu...';
+          if crontab -u ubuntu -l | grep -q "/app/workspace_na_pipeline.sh"; then
+            echo "CRON_SETUP_VERIFY: Crontab for ubuntu user successfully verified.";
+            crontab -u ubuntu -l; 
+          else
+            echo "CRON_SETUP_VERIFY_ERROR: Crontab for ubuntu user not found or does not contain the job." >&2;
+            echo "Current crontab for ubuntu:" >&2;
+            crontab -u ubuntu -l || echo " (no crontab for ubuntu or error listing)" >&2;
+          fi
+
+          echo 'CRON_SETUP: Starting cron service using /usr/sbin/cron...';
+          touch "$$_CRON_LOG_FILE"; 
+          chown ubuntu:ubuntu "$$_CRON_LOG_FILE"; 
+          
+          (/usr/sbin/cron -f &); 
+          sleep 2; 
+
+          echo 'CRON_SETUP: Checking cron service status...';
+          if pgrep cron > /dev/null; then
+            echo "CRON_SETUP_VERIFY: Cron service is running (PID $$(pgrep cron))."; # $$ for command substitution by shell
+          else
+            echo "CRON_SETUP_VERIFY_ERROR: Cron service does not appear to be running." >&2;
+            service cron status || echo "service cron status command failed" >&2;
+          fi
+          
+          echo 'SETUP: Wrapper container setup complete. Switching to ubuntu user for main process.';
+          # For variables used inside su -c '...', they need to be passed in or expanded carefully.
+          # ${CRON_SCHEDULE} is an env var, so it's fine.
+          # For shell command substitutions like $(whoami), they need to be escaped for the outer sh -c
+          # and then again for the su -c '...' if they are inside single quotes.
+          # Simpler to just let them run in the sub-shell.
+          su ubuntu -c 'echo "USER_CONTEXT: Now running as user: $$(whoami) (UID $$(id -u), GID $$(id -g))"; \
+                         echo "USER_CONTEXT: NVIDIA SMI:"; \
+                         nvidia-smi || echo "nvidia-smi not found or failed"; \
+                         echo "USER_CONTEXT: Docker version (talking to internal daemon): $$(docker --version)"; \
+                         echo "USER_CONTEXT: Inner Docker Info:"; \
                          docker info || echo "Failed to get inner docker info"; \
-                         echo "DinD GPU User Context: To run your pipeline, exec into this container as ubuntu and run ./workspace_na_pipeline.sh"; \
-                         tail -f /var/log/dockerd.log /app/logs/pipeline_cron_runs.log /var/log/syslog'
+                         echo "USER_CONTEXT: Cron service status (from ubuntu user perspective):"; \
+                         pgrep cron && echo "Cron process found." || echo "Cron process NOT found."; \
+                         echo "USER_CONTEXT: Ubuntu crontab list:"; \
+                         crontab -l || echo "No crontab for ubuntu or error listing."; \
+                         echo "USER_CONTEXT: Cron job is set to run on schedule: ${CRON_SCHEDULE}"; \
+                         echo "USER_CONTEXT: Tailing /dev/null to keep container alive. Monitor /app/logs/pipeline_cron_runs.log for cron job output."; \
+                         tail -f /dev/null'
 
 volumes:
   loghi_dind_storage: {}       
