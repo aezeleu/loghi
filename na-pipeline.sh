@@ -86,6 +86,7 @@ echo "INFO (na-pipeline.sh): Docker containers will be run as UID: $CURRENT_UID,
 
 if [[ $BASELINELAYPA -eq 1 ]]; then
     echo "INFO (na-pipeline.sh): Starting Laypa baseline detection."
+    # Variables for Laypa paths (no 'local' as they are used at script level within this block)
     laypa_input_dir="$SRC"
     laypa_output_dir="$SRC" 
     LAYPADIR_MODEL_BASE="$(dirname "${LAYPAMODEL}")"
@@ -124,6 +125,7 @@ if [[ $BASELINELAYPA -eq 1 ]]; then
     fi
     echo "INFO (na-pipeline.sh): Laypa baseline detection finished."
 
+    # Variable for MinionExtractBaselines path (no 'local')
     page_xml_dir_for_minion="${laypa_output_dir}/page" 
     if [ ! -d "$page_xml_dir_for_minion" ]; then
         echo "ERROR (na-pipeline.sh): Laypa did not create the expected directory: $page_xml_dir_for_minion. This means no baselines were detected or Laypa failed silently."
@@ -146,6 +148,7 @@ fi
 
 if [[ $HTRLOGHI -eq 1 ]]; then
     echo "INFO (na-pipeline.sh): Starting Loghi HTR process."
+    # Variable for HTR cut path (no 'local')
     page_xml_dir_htr_cut="$SRC/page" 
 
     if [ ! -d "$page_xml_dir_htr_cut" ] || [ -z "$(ls -A "$page_xml_dir_htr_cut"/*.xml 2>/dev/null)" ]; then
@@ -235,13 +238,13 @@ fi
 
 if [[ $RECALCULATEREADINGORDER -eq 1 ]]; then
     echo "INFO (na-pipeline.sh): Recalculating reading order."
-    # --- CORRECTED: Removed 'local' keyword ---
+    # Variable for RecalculateReadingOrder path (no 'local')
     page_dir_recalc="$SRC/page/" 
-    # --- END CORRECTION ---
     if [ ! -d "$page_dir_recalc" ] || [ -z "$(ls -A "$page_dir_recalc"/*.xml 2>/dev/null)" ]; then
         echo "WARNING (na-pipeline.sh): Page directory '$page_dir_recalc' not found or no XMLs present. Skipping reading order recalculation."
     else
-        local recalc_cmd_args_array=( # 'local' is fine for this array definition
+        # 'local' is fine here as it's an array definition scoped to this block effectively
+        local recalc_cmd_args_array=(
             /src/loghi-tooling/minions/target/appassembler/bin/MinionRecalculateReadingOrderNew
             -input_dir "$page_dir_recalc"
             -border_margin "$RECALCULATEREADINGORDERBORDERMARGIN"
@@ -262,9 +265,8 @@ fi
 
 if [[ $DETECTLANGUAGE -eq 1 ]]; then
     echo "INFO (na-pipeline.sh): Detecting language."
-    # --- CORRECTED: Removed 'local' keyword ---
+    # Variable for DetectLanguage path (no 'local')
     page_dir_lang="$SRC/page/" 
-    # --- END CORRECTION ---
      if [ ! -d "$page_dir_lang" ] || [ -z "$(ls -A "$page_dir_lang"/*.xml 2>/dev/null)" ]; then
         echo "WARNING (na-pipeline.sh): Page directory '$page_dir_lang' not found or no XMLs present. Skipping language detection."
     else
@@ -279,9 +281,8 @@ fi
 
 if [[ $SPLITWORDS -eq 1 ]]; then
     echo "INFO (na-pipeline.sh): Splitting words (MinionSplitPageXMLTextLineIntoWords)."
-    # --- CORRECTED: Removed 'local' keyword ---
+    # Variable for SplitWords path (no 'local')
     page_dir_split="$SRC/page/" 
-    # --- END CORRECTION ---
     if [ ! -d "$page_dir_split" ] || [ -z "$(ls -A "$page_dir_split"/*.xml 2>/dev/null)" ]; then
         echo "WARNING (na-pipeline.sh): Page directory '$page_dir_split' not found or no XMLs present. Skipping word splitting."
     else
@@ -300,7 +301,6 @@ mkdir -p "$OUT"
 echo "INFO (na-pipeline.sh): Copying original images from $SRC to $OUT"
 find "$SRC" -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.tif" -o -iname "*.tiff" \) -exec cp -p {} "$OUT/" \;
 
-# --- ENHANCED: Copy generated PNGs (baselines/page images) from $SRC/page to $OUT ---
 if [ -d "$SRC/page" ]; then
     echo "INFO (na-pipeline.sh): Copying XML files from $SRC/page to $OUT"
     find "$SRC/page" -maxdepth 1 -type f -name "*.xml" -exec cp -p {} "$OUT/" \;
@@ -310,7 +310,6 @@ if [ -d "$SRC/page" ]; then
 else
     echo "WARNING (na-pipeline.sh): No $SRC/page directory found to copy XMLs or PNGs from."
 fi
-# --- END ENHANCEMENT ---
 
 echo "INFO (na-pipeline.sh): Cleaning up internal temporary directory: $tmpdir"
 rm -rf "$tmpdir"

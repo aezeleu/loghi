@@ -3,8 +3,8 @@
 services:
   loghi-wrapper:
     build:
-      context: .. 
-      dockerfile: ./docker-wrapper/Dockerfile 
+      context: ..
+      dockerfile: ./docker-wrapper/Dockerfile
     image: loghi-wrapper:dind-gpu 
     container_name: loghi-wrapper
     privileged: true # For DinD
@@ -106,7 +106,7 @@ services:
                          echo "DinD GPU User Context: Inner Docker Info (check runtimes):"; \
                          docker info || echo "Failed to get inner docker info"; \
                          echo "DinD GPU User Context: To run your pipeline, exec into this container as ubuntu and run ./workspace_na_pipeline.sh"; \
-                         tail -f /dev/null'
+                         tail -f /var/log/dockerd.log /app/logs/pipeline_cron_runs.log /var/log/syslog'
 
 volumes:
   loghi_dind_storage: {}       
