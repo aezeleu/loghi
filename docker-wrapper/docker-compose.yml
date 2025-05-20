@@ -19,15 +19,16 @@ services:
 
     volumes:
       - loghi_dind_storage:/var/lib/docker 
-      - ${LAYPA_MODULE:-./submodules/laypa}:/app/laypa
-      - ${LOGHI_HTR_MODULE:-./submodules/loghi-htr}:/app/loghi-htr
-      - ${LOGHI_TOOLING_MODULE:-./submodules/loghi-tooling}:/app/loghi-tooling
-      - ${PRIMA_CORE_LIBS_MODULE:-./submodules/prima-core-libs}:/app/prima-core-libs
+      # - ${LAYPA_MODULE:-./submodules/laypa}:/app/laypa
+      # - ${LOGHI_HTR_MODULE:-./submodules/loghi-htr}:/app/loghi-htr
+      # - ${LOGHI_TOOLING_MODULE:-./submodules/loghi-tooling}:/app/loghi-tooling
+      # - ${PRIMA_CORE_LIBS_MODULE:-./submodules/prima-core-libs}:/app/prima-core-libs
       - ${WORKSPACE_PATH:-./data/pipeline_input}:/workspace
       - ${DESTINATION_PATH:-./data/pipeline_output}:/destination
       - loghi_wrapper_logs:/app/logs
       - loghi_wrapper_tmp:/tmp 
       - loghi_wrapper_app_temp:/app/temp_workspace
+      - ..:/app
 
     environment:
       - TZ=${TZ:-Europe/Amsterdam}
@@ -40,6 +41,8 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - CRON_SCHEDULE=${CRON_SCHEDULE:-*/2 * * * *} 
+      - PIPELINE_ENABLE_DEBUG_LOGGING=${PIPELINE_ENABLE_DEBUG_LOGGING:-false}
+      - PIPELINE_KEEP_TEMP_RUN_DIR=${PIPELINE_KEEP_TEMP_RUN_DIR:-false}
 
     command:
       - sh
