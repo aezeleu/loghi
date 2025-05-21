@@ -19,18 +19,18 @@ services:
 
     volumes:
       - loghi_dind_storage:/var/lib/docker 
-      # - ${LAYPA_MODULE:-./submodules/laypa}:/app/laypa
-      # - ${LOGHI_HTR_MODULE:-./submodules/loghi-htr}:/app/loghi-htr
-      # - ${LOGHI_TOOLING_MODULE:-./submodules/loghi-tooling}:/app/loghi-tooling
-      # - ${PRIMA_CORE_LIBS_MODULE:-./submodules/prima-core-libs}:/app/prima-core-libs
+      - ${LAYPA_MODULE:-./submodules/laypa}:/app/laypa
+      - ${LOGHI_HTR_MODULE:-./submodules/loghi-htr}:/app/loghi-htr
+      - ${LOGHI_TOOLING_MODULE:-./submodules/loghi-tooling}:/app/loghi-tooling
+      - ${PRIMA_CORE_LIBS_MODULE:-./submodules/prima-core-libs}:/app/prima-core-libs
       - ${WORKSPACE_PATH:-./data/pipeline_input}:/workspace
       - ${DESTINATION_PATH:-./data/pipeline_output}:/destination
       - loghi_wrapper_logs:/app/logs
       - loghi_wrapper_tmp:/tmp 
       - loghi_wrapper_app_temp:/app/temp_workspace
-      - ..:/app
 
     environment:
+      # These are available to the main container process and interactive shells
       - TZ=${TZ:-Europe/Amsterdam}
       - WORKSPACE_PATH=/workspace         
       - DESTINATION_PATH=/destination   
@@ -40,9 +40,13 @@ services:
       - MPLCONFIGDIR=/tmp/matplotlib_cache_wrapper
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      - CRON_SCHEDULE=${CRON_SCHEDULE:-*/2 * * * *} 
+      - CRON_SCHEDULE=${CRON_SCHEDULE:-* * * * *} # Default to every minute for testing
+      # These will be passed to the cron job environment explicitly
       - PIPELINE_ENABLE_DEBUG_LOGGING=${PIPELINE_ENABLE_DEBUG_LOGGING:-false}
       - PIPELINE_KEEP_TEMP_RUN_DIR=${PIPELINE_KEEP_TEMP_RUN_DIR:-false}
+      - COPY_SOURCE_IMAGES=${COPY_SOURCE_IMAGES:-true}
+      - COPY_BASELINE_IMAGES=${COPY_BASELINE_IMAGES:-true}
+      - REMOVE_PROCESSED_DIRS=${REMOVE_PROCESSED_DIRS:-true}
 
     command:
       - sh
@@ -64,18 +68,17 @@ services:
           EOF
           echo "SETUP: Inner daemon.json configured.";
 
+          echo 'SETUP: Cleaning up potential stale Docker PID file...';
+          rm -f /var/run/docker.pid; 
+
           echo 'SETUP: Starting internal Docker daemon service...';
-          # Define DOCKERD_LOG_FILE as a shell variable
           _DOCKERD_LOG_FILE="/var/log/dockerd.log";
-          # Ensure the log directory exists and the file can be created
-          mkdir -p "$$(dirname "$$_DOCKERD_LOG_FILE")"; # Use $$ for shell expansion
-          touch "$$_DOCKERD_LOG_FILE"; # Use $$ for shell expansion
+          mkdir -p "$$(dirname "$$_DOCKERD_LOG_FILE")"; 
+          touch "$$_DOCKERD_LOG_FILE"; 
           (dockerd --host=unix:///var/run/docker.sock --host=tcp://0.0.0.0:2375 > "$$_DOCKERD_LOG_FILE" 2>&1 &);
           
           echo 'SETUP: Waiting for Docker daemon to be responsive...';
-          # Define DOCKER_START_TIMEOUT as a shell variable
           _DOCKER_START_TIMEOUT=120; 
-          # Use the shell variable directly in the timeout command
           if ! timeout "$$_DOCKER_START_TIMEOUT" sh -c \
             'while ! docker -H unix:///var/run/docker.sock info > /dev/null 2>&1; do echo -n "D_ping." ; sleep 1; done' ; then
             echo; echo "SETUP_ERROR: Docker daemon did not become responsive within $$_DOCKER_START_TIMEOUT seconds." >&2;
@@ -98,11 +101,25 @@ services:
 
           echo 'CRON_SETUP: Creating crontab content for ubuntu user...';
           _CRON_LOG_FILE="/app/logs/pipeline_cron_runs.log";
-          # ${CRON_SCHEDULE} is an environment variable from docker-compose, correctly substituted.
-          # $$_CRON_LOG_FILE will become $_CRON_LOG_FILE for the shell.
-          _CRON_JOB_LINE="${CRON_SCHEDULE} /usr/bin/flock -n /tmp/pipeline_cron.lock -c '/bin/bash /app/workspace_na_pipeline.sh /workspace /destination >> $$_CRON_LOG_FILE 2>&1'";
+          
+          # Define the environment variables to be set for the cron job
+          # Docker Compose will substitute these ${VAR} from its environment (e.g., .env file)
+          CRON_ENV_SETTINGS="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+          CRON_ENV_SETTINGS="${CRON_ENV_SETTINGS} LANG=${LANG}";
+          CRON_ENV_SETTINGS="${CRON_ENV_SETTINGS} LC_ALL=${LC_ALL}";
+          CRON_ENV_SETTINGS="${CRON_ENV_SETTINGS} PIPELINE_ENABLE_DEBUG_LOGGING=${PIPELINE_ENABLE_DEBUG_LOGGING}";
+          CRON_ENV_SETTINGS="${CRON_ENV_SETTINGS} PIPELINE_KEEP_TEMP_RUN_DIR=${PIPELINE_KEEP_TEMP_RUN_DIR}";
+          CRON_ENV_SETTINGS="${CRON_ENV_SETTINGS} COPY_SOURCE_IMAGES=${COPY_SOURCE_IMAGES}";
+          CRON_ENV_SETTINGS="${CRON_ENV_SETTINGS} COPY_BASELINE_IMAGES=${COPY_BASELINE_IMAGES}";
+          CRON_ENV_SETTINGS="${CRON_ENV_SETTINGS} REMOVE_PROCESSED_DIRS=${REMOVE_PROCESSED_DIRS}";
+          # Add any other necessary environment variables here
+
+          # Construct the full cron job line, including environment settings
+          # $$_CRON_LOG_FILE will be expanded by the shell running the flock command
+          _CRON_JOB_LINE="${CRON_SCHEDULE} ${CRON_ENV_SETTINGS} /usr/bin/flock -n /tmp/pipeline_cron.lock -c '/bin/bash /app/workspace_na_pipeline.sh /workspace /destination >> $$_CRON_LOG_FILE 2>&1'";
           
           echo "CRON_SETUP: Generated cron job line will be: $$_CRON_JOB_LINE"; 
+          # Write the job line (which includes env settings) to the crontab file
           echo "$$_CRON_JOB_LINE" > /tmp/ubuntu_crontab; 
           
           echo "CRON_SETUP: Attempting to install crontab for ubuntu user...";
@@ -132,18 +149,13 @@ services:
 
           echo 'CRON_SETUP: Checking cron service status...';
           if pgrep cron > /dev/null; then
-            echo "CRON_SETUP_VERIFY: Cron service is running (PID $$(pgrep cron))."; # $$ for command substitution by shell
+            echo "CRON_SETUP_VERIFY: Cron service is running (PID $$(pgrep cron))."; 
           else
             echo "CRON_SETUP_VERIFY_ERROR: Cron service does not appear to be running." >&2;
             service cron status || echo "service cron status command failed" >&2;
           fi
           
           echo 'SETUP: Wrapper container setup complete. Switching to ubuntu user for main process.';
-          # For variables used inside su -c '...', they need to be passed in or expanded carefully.
-          # ${CRON_SCHEDULE} is an env var, so it's fine.
-          # For shell command substitutions like $(whoami), they need to be escaped for the outer sh -c
-          # and then again for the su -c '...' if they are inside single quotes.
-          # Simpler to just let them run in the sub-shell.
           su ubuntu -c 'echo "USER_CONTEXT: Now running as user: $$(whoami) (UID $$(id -u), GID $$(id -g))"; \
                          echo "USER_CONTEXT: NVIDIA SMI:"; \
                          nvidia-smi || echo "nvidia-smi not found or failed"; \
@@ -155,6 +167,8 @@ services:
                          echo "USER_CONTEXT: Ubuntu crontab list:"; \
                          crontab -l || echo "No crontab for ubuntu or error listing."; \
                          echo "USER_CONTEXT: Cron job is set to run on schedule: ${CRON_SCHEDULE}"; \
+                         echo "USER_CONTEXT: Cron debug logging env var: $${PIPELINE_ENABLE_DEBUG_LOGGING}"; \
+                         echo "USER_CONTEXT: Cron keep temp dir env var: $${PIPELINE_KEEP_TEMP_RUN_DIR}"; \
                          echo "USER_CONTEXT: Tailing /dev/null to keep container alive. Monitor /app/logs/pipeline_cron_runs.log for cron job output."; \
                          tail -f /dev/null'
 
