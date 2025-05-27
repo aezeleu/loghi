@@ -6,7 +6,7 @@ FROM nvidia/cuda:12.1.0-base-ubuntu22.04
 # Or stick to your ubuntu:24.04 and install drivers/toolkit manually (more complex)
 # FROM ubuntu:24.04
 
-LABEL maintainer="Loghi Team"
+LABEL maintainer="Arthur Rahimov"
 LABEL description="Docker wrapper for Loghi HTR processing pipeline (DinD with GPU support)"
 
 # Set DEBIAN_FRONTEND to noninteractive to avoid prompts during apt-get install
