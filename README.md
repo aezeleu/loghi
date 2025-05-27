@@ -1,6 +1,6 @@
 # Loghi-Aezel (Fork of Loghi)
 
-Loghi is a set of tools for Handwritten Text Recognition (HTR). This "Loghi-Aezel" fork is specifically adapted for the Sittard Archive, Limburg province. It is based on the original [Loghi project by KNAW Huc](https://github.com/knaw-huc/loghi).
+Loghi is a set of tools for Handwritten Text Recognition (HTR). This "Loghi-Aezel" fork is specifically adapted for the [Aezel project powered by LGGI](https://lggi.nl/), Limburg province. It is based on the original [Loghi project by KNAW Huc](https://github.com/knaw-huc/loghi).
 
 This document provides an overview of the `docker-wrapper` for the Loghi-Aezel project, detailing its setup, usage, and configuration for streamlined deployment and automated processing.
 
@@ -255,5 +255,5 @@ This "Loghi-Aezel" fork is developed and maintained by:
 
 * **Arthur Rahimov**
     * Email: a.ragimov@aezel.eu
-    * Organization: [Aezel](https://aezel.eu)
+    * Organization: Aezel / [LGGI](https://lggi.nl/)
     * Personal Website: [ragmon.nl](https://ragmon.nl)
