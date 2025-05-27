@@ -9,3 +9,4 @@ _my_test_artifacts/
 xml_conversion_errors.log
 les-15_en_16/
 logs/*.log
+_docker-wrapper

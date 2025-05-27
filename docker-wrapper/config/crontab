@@ -1,7 +1,0 @@
-# Loghi Cron Jobs
-# Format: minute hour day month weekday command
-
-# Process files every 1 minutes
-* * * * * root /app/pipeline_wrapper.sh /app/data/input /app/data/output >> /app/logs/cron.log 2>&1
-
-# Empty line at the end of file is required 
